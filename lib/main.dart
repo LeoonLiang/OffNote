@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -11,6 +12,7 @@ import 'js_result_decoder.dart';
 import 'link_parser.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'snapshot_readiness.dart';
 import 'web_navigation_policy.dart';
 
 void main() {
@@ -36,30 +38,38 @@ class OffNoteApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return ShadApp(
       title: 'OffNote',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: _paper,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _accent,
-          brightness: Brightness.light,
-          surface: _paper,
+      theme: ShadThemeData(
+        brightness: Brightness.light,
+        colorScheme: const ShadZincColorScheme.light(
+          background: _paper,
+          foreground: _ink,
+          card: Colors.white,
+          cardForeground: _ink,
+          popover: Colors.white,
+          popoverForeground: _ink,
+          primary: _accent,
+          primaryForeground: Colors.white,
+          secondary: Color(0xffeef1e8),
+          secondaryForeground: _ink,
+          muted: Color(0xffeef1e8),
+          mutedForeground: _muted,
+          accent: _accentSoft,
+          accentForeground: _ink,
+          border: Color(0xffdedfd7),
+          input: Color(0xffdedfd7),
+          ring: _accent,
         ),
+      ),
+      materialThemeBuilder: (context, theme) => theme.copyWith(
+        scaffoldBackgroundColor: _paper,
         appBarTheme: const AppBarTheme(
           backgroundColor: _paper,
           foregroundColor: _ink,
           centerTitle: true,
           elevation: 0,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
         ),
       ),
       home: const HomePage(),
@@ -82,7 +92,7 @@ class _HomePageState extends State<HomePage> {
   void _refresh() => setState(() => _refreshTick++);
 
   Future<void> _openSaveDialog() async {
-    final article = await showDialog<SavedArticle>(
+    final article = await showShadDialog<SavedArticle>(
       context: context,
       barrierDismissible: false,
       builder: (_) => SaveArticleDialog(store: _store),
@@ -199,6 +209,7 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
   WebViewController? _controller;
   Completer<void>? _pageLoaded;
   String? _message;
+  int _pageProgress = 0;
   bool _saving = false;
 
   @override
@@ -224,6 +235,7 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     setState(() {
       _saving = true;
       _message = null;
+      _pageProgress = 0;
     });
 
     try {
@@ -236,12 +248,15 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
 
       _setStep(1, _StepState.running);
       final controller = await _createController();
-      _controller = controller;
       _pageLoaded = Completer<void>();
+      setState(() => _controller = controller);
       await controller.loadRequest(Uri.parse(url));
       await _pageLoaded!.future.timeout(const Duration(seconds: 35));
+      setState(() => _message = '网页已打开，正在等待正文和图片渲染完整...');
+      await _waitForSnapshotReady(controller);
       final sourceUrl = await controller.currentUrl() ?? url;
       _setStep(1, _StepState.done);
+      setState(() => _message = '网页内容已就绪，正在生成离线快照...');
 
       _setStep(2, _StepState.running);
       final htmlResult = await controller.runJavaScriptReturningResult(
@@ -274,11 +289,32 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     }
   }
 
+  Future<void> _waitForSnapshotReady(WebViewController controller) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 18));
+    Object? lastResult;
+    while (DateTime.now().isBefore(deadline)) {
+      lastResult = await controller.runJavaScriptReturningResult(
+        snapshotReadyProbeScript,
+      );
+      if (decodeSnapshotReadinessResult(lastResult)) {
+        await Future<void>.delayed(const Duration(milliseconds: 900));
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    throw TimeoutException('网页内容还没加载完成，请稍后重试');
+  }
+
   Future<WebViewController> _createController() async {
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() => _pageProgress = progress);
+            }
+          },
           onPageFinished: (_) {
             if (_pageLoaded?.isCompleted == false) {
               _pageLoaded?.complete();
@@ -309,61 +345,239 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      surfaceTintColor: Colors.white,
+    final controller = _controller;
+    final theme = ShadTheme.of(context);
+    return ShadDialog(
       title: const Text('保存网页'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _textController,
-              enabled: !_saving,
-              minLines: 3,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText: '粘贴小红书分享文本或网页链接',
-                prefixIcon: Icon(Icons.link_rounded),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ..._steps.map((step) => _ProgressRow(step: step)),
-            if (_message != null) ...[
-              const SizedBox(height: 12),
-              Text(_message!, style: const TextStyle(color: Colors.redAccent)),
-            ],
-            if (_controller != null)
-              SizedBox.square(
-                dimension: 1,
-                child: Opacity(
-                  opacity: 0.01,
-                  child: WebViewWidget(controller: _controller!),
+      description: const Text('粘贴链接后会先加载网页，确认正文和图片就绪，再生成离线快照。'),
+      closeIcon: ShadIconButton.ghost(
+        enabled: !_saving,
+        icon: const Icon(LucideIcons.x),
+        onPressed: _saving ? null : () => Navigator.of(context).pop(),
+      ),
+      constraints: const BoxConstraints(maxWidth: 540),
+      radius: BorderRadius.circular(24),
+      padding: const EdgeInsets.all(20),
+      gap: 14,
+      child: SizedBox(
+        width: 520,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 680),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('分享文本或网页链接', style: theme.textTheme.small),
+                const SizedBox(height: 8),
+                ShadTextarea(
+                  controller: _textController,
+                  enabled: !_saving,
+                  placeholder: const Text('粘贴小红书分享文本或网页链接'),
+                  minHeight: 106,
+                  maxHeight: 142,
+                  resizable: false,
+                  leading: const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(LucideIcons.link, size: 18),
+                  ),
                 ),
-              ),
-          ],
+                const SizedBox(height: 14),
+                ShadCard(
+                  padding: const EdgeInsets.all(14),
+                  backgroundColor: _paper,
+                  radius: BorderRadius.circular(18),
+                  child: Column(
+                    children: [
+                      ..._steps.map((step) => _ProgressRow(step: step)),
+                      if (_message != null) ...[
+                        const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _message!,
+                            style: TextStyle(
+                              color: _message!.startsWith('保存失败')
+                                  ? Colors.redAccent
+                                  : _muted,
+                              fontSize: 12,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (controller != null) ...[
+                  const SizedBox(height: 14),
+                  ShadCard(
+                    padding: EdgeInsets.zero,
+                    radius: BorderRadius.circular(18),
+                    child: _WebPreviewFrame(
+                      controller: controller,
+                      progress: _pageProgress,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ShadButton.outline(
+                        onPressed: _saving
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        height: 46,
+                        enabled: !_saving,
+                        width: double.infinity,
+                        child: const Text('取消'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ShadButton(
+                        onPressed: _saving ? null : _save,
+                        enabled: !_saving,
+                        height: 46,
+                        width: double.infinity,
+                        leading: _saving
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(LucideIcons.bookMarked, size: 17),
+                        child: Text(_saving ? '保存中' : '解析并保存'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton.icon(
-          onPressed: _saving ? null : _save,
-          icon: _saving
-              ? const SizedBox.square(
-                  dimension: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.bookmark_add_rounded),
-          label: const Text('保存'),
-        ),
-      ],
     );
   }
 }
+
+class _WebPreviewFrame extends StatelessWidget {
+  const _WebPreviewFrame({required this.controller, required this.progress});
+
+  final WebViewController controller;
+  final int progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 280,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(17),
+        child: Column(
+          children: [
+            Container(
+              height: 38,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: const BoxDecoration(
+                color: _paper,
+                border: Border(bottom: BorderSide(color: Color(0xffe3e5dc))),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.language_rounded, size: 17, color: _muted),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      '加载预览',
+                      style: TextStyle(
+                        color: _muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${progress.clamp(0, 100)}%',
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (progress < 100)
+              ShadProgress(
+                value: progress <= 0 ? null : progress / 100,
+                minHeight: 2,
+                backgroundColor: Colors.transparent,
+                color: _accent,
+              ),
+            Expanded(child: WebViewWidget(controller: controller)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProgressRow extends StatelessWidget {
+  const _ProgressRow({required this.step});
+
+  final _SaveStep step;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (step.state) {
+      _StepState.done => _accent,
+      _StepState.running => _accent,
+      _StepState.waiting => const Color(0xffc8cbc1),
+    };
+    final icon = switch (step.state) {
+      _StepState.done => Icons.check_circle_rounded,
+      _StepState.running => Icons.radio_button_checked_rounded,
+      _StepState.waiting => Icons.circle_outlined,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              step.label,
+              style: TextStyle(
+                color: step.state == _StepState.waiting ? _muted : _ink,
+                fontWeight: step.state == _StepState.waiting
+                    ? FontWeight.w500
+                    : FontWeight.w800,
+              ),
+            ),
+          ),
+          if (step.state == _StepState.running)
+            const SizedBox.square(
+              dimension: 15,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SaveStep {
+  _SaveStep(this.label);
+
+  final String label;
+  _StepState state = _StepState.waiting;
+}
+
+enum _StepState { waiting, running, done }
 
 class ArticleListPage extends StatefulWidget {
   const ArticleListPage({
@@ -461,17 +675,17 @@ class _ArticleListPageState extends State<ArticleListPage> {
   }
 
   Future<void> _confirmDelete(SavedArticle article) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showShadDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => ShadDialog.alert(
         title: const Text('删除离线文章'),
-        content: Text('确定删除「${article.title}」吗？本地 HTML 和图片也会一起删除。'),
+        description: Text('确定删除「${article.title}」吗？本地 HTML 和图片也会一起删除。'),
         actions: [
-          TextButton(
+          ShadButton.outline(
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          ShadButton.destructive(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('删除'),
           ),
@@ -520,7 +734,7 @@ class _CategoryPageState extends State<CategoryPage> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
-          TextButton(onPressed: _createCategory, child: const Text('新建')),
+          ShadButton.ghost(onPressed: _createCategory, child: const Text('新建')),
         ],
       ),
       body: SafeArea(
@@ -534,10 +748,11 @@ class _CategoryPageState extends State<CategoryPage> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
-                OutlinedButton.icon(
+                ShadButton.outline(
                   onPressed: _createCategory,
-                  icon: const Icon(Icons.add_rounded),
-                  label: const Text('新建文件夹'),
+                  width: double.infinity,
+                  leading: const Icon(LucideIcons.folderPlus, size: 18),
+                  child: const Text('新建文件夹'),
                 ),
                 const SizedBox(height: 12),
                 if (categories.isEmpty)
@@ -593,17 +808,17 @@ class _CategoryPageState extends State<CategoryPage> {
   }
 
   Future<void> _deleteCategory(SavedCategory category) async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showShadDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => ShadDialog.alert(
         title: const Text('删除分类'),
-        content: Text('删除「${category.name}」后，文章会变为未分类。'),
+        description: Text('删除「${category.name}」后，文章会变为未分类。'),
         actions: [
-          TextButton(
+          ShadButton.outline(
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('取消'),
           ),
-          FilledButton(
+          ShadButton.destructive(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('删除'),
           ),
@@ -621,29 +836,39 @@ class _CategoryPageState extends State<CategoryPage> {
   Future<String?> _askName({
     required String title,
     required String initialValue,
-  }) {
+  }) async {
     final controller = TextEditingController(text: initialValue);
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: '文件夹名称'),
+    try {
+      return await showShadDialog<String>(
+        context: context,
+        builder: (context) => ShadDialog(
+          title: Text(title),
+          description: const Text('分类会显示在底部“分类”页里。'),
+          constraints: const BoxConstraints(maxWidth: 420),
+          actions: [
+            ShadButton.outline(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            ShadButton(
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('保存'),
+            ),
+          ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: ShadInput(
+              controller: controller,
+              autofocus: true,
+              placeholder: const Text('文件夹名称'),
+              leading: const Icon(LucideIcons.folder, size: 18),
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 }
 
@@ -681,13 +906,11 @@ class _SearchPageState extends State<SearchPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: TextField(
+              child: ShadInput(
                 controller: _controller,
                 autofocus: false,
-                decoration: const InputDecoration(
-                  hintText: '搜索标题或正文',
-                  prefixIcon: Icon(Icons.search_rounded),
-                ),
+                placeholder: const Text('搜索标题或正文'),
+                leading: const Icon(LucideIcons.search, size: 18),
                 onChanged: (_) => _search(),
               ),
             ),
@@ -896,18 +1119,27 @@ class _ArticleTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final coverPath = article.coverPath;
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
+    final theme = ShadTheme.of(context);
+    return ShadCard(
+      padding: EdgeInsets.zero,
+      radius: BorderRadius.circular(18),
+      border: ShadBorder.all(color: theme.colorScheme.border),
+      shadows: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.035),
+          blurRadius: 20,
+          offset: const Offset(0, 10),
+        ),
+      ],
       child: InkWell(
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(12),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
                 child: SizedBox(
                   width: 86,
                   height: 76,
@@ -954,11 +1186,10 @@ class _ArticleTile extends StatelessWidget {
                 ),
               ),
               if (onDelete != null)
-                IconButton(
+                ShadIconButton.ghost(
                   onPressed: onDelete,
-                  tooltip: '删除',
-                  icon: const Icon(Icons.delete_outline_rounded),
-                  color: Colors.black38,
+                  icon: const Icon(LucideIcons.trash2, size: 18),
+                  foregroundColor: Colors.black45,
                 ),
             ],
           ),
@@ -983,69 +1214,39 @@ class _CategoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 10),
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ListTile(
-        onTap: onTap,
-        leading: Icon(
-          Icons.folder_rounded,
-          color: Color(category.color),
-          size: 34,
-        ),
-        title: Text(
-          category.name,
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-        subtitle: const Text('文件夹'),
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'rename') {
-              onRename();
-            } else if (value == 'delete') {
-              onDelete();
-            }
-          },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'rename', child: Text('重命名')),
-            PopupMenuItem(value: 'delete', child: Text('删除')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ProgressRow extends StatelessWidget {
-  const _ProgressRow({required this.step});
-
-  final _SaveStep step;
-
-  @override
-  Widget build(BuildContext context) {
-    final icon = switch (step.state) {
-      _StepState.waiting => Icons.radio_button_unchecked_rounded,
-      _StepState.running => Icons.downloading_rounded,
-      _StepState.done => Icons.check_circle_rounded,
-    };
-    final color = switch (step.state) {
-      _StepState.waiting => Colors.black26,
-      _StepState.running => _accent,
-      _StepState.done => _accent,
-    };
+    final theme = ShadTheme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
-          Text(
-            step.label,
-            style: TextStyle(color: color == _accent ? _ink : _muted),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: ShadCard(
+        padding: EdgeInsets.zero,
+        radius: BorderRadius.circular(18),
+        border: ShadBorder.all(color: theme.colorScheme.border),
+        child: ListTile(
+          onTap: onTap,
+          leading: Icon(
+            Icons.folder_rounded,
+            color: Color(category.color),
+            size: 34,
           ),
-        ],
+          title: Text(
+            category.name,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: const Text('文件夹'),
+          trailing: PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'rename') {
+                onRename();
+              } else if (value == 'delete') {
+                onDelete();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'rename', child: Text('重命名')),
+              PopupMenuItem(value: 'delete', child: Text('删除')),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1127,15 +1328,6 @@ class _EmptyMessage extends StatelessWidget {
     );
   }
 }
-
-class _SaveStep {
-  _SaveStep(this.label);
-
-  final String label;
-  _StepState state = _StepState.waiting;
-}
-
-enum _StepState { waiting, running, done }
 
 String _dateLabel(DateTime date) {
   return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';

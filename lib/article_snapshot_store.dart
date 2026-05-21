@@ -9,6 +9,7 @@ import 'article_database.dart';
 import 'article_file_paths.dart';
 import 'article_snapshot.dart';
 import 'saved_article.dart';
+import 'saved_category.dart';
 import 'xhs_offline_html.dart';
 
 class ArticleSnapshotStore {
@@ -72,8 +73,30 @@ class ArticleSnapshotStore {
 
   Future<List<SavedArticle>> listArticles() => _database.listArticles();
 
+  Future<List<SavedArticle>> listArticlesByCategory(String categoryId) {
+    return _database.listArticlesByCategory(categoryId);
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) {
     return _database.searchArticles(query);
+  }
+
+  Future<List<SavedCategory>> listCategories() => _database.listCategories();
+
+  Future<SavedCategory> createCategory(String name, int color) {
+    return _database.createCategory(name, color);
+  }
+
+  Future<void> renameCategory(String id, String name) {
+    return _database.renameCategory(id, name);
+  }
+
+  Future<void> deleteCategory(String id) {
+    return _database.deleteCategory(id);
+  }
+
+  Future<void> assignArticleCategory(String articleId, String? categoryId) {
+    return _database.assignArticleCategory(articleId, categoryId);
   }
 
   Future<void> deleteArticle(SavedArticle article) async {

@@ -7,6 +7,7 @@ class SavedArticle {
     required this.coverPath,
     required this.sourceUrl,
     required this.createdAt,
+    this.categoryId,
   });
 
   final String id;
@@ -16,6 +17,7 @@ class SavedArticle {
   final String? coverPath;
   final String sourceUrl;
   final DateTime createdAt;
+  final String? categoryId;
 
   Map<String, Object?> toMap() {
     return {
@@ -26,6 +28,7 @@ class SavedArticle {
       'cover_path': coverPath,
       'source_url': sourceUrl,
       'created_at': createdAt.millisecondsSinceEpoch,
+      'category_id': categoryId,
     };
   }
 
@@ -38,6 +41,20 @@ class SavedArticle {
       coverPath: map['cover_path'] as String?,
       sourceUrl: map['source_url'] as String? ?? '',
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
+      categoryId: map['category_id'] as String?,
+    );
+  }
+
+  SavedArticle copyWith({String? categoryId}) {
+    return SavedArticle(
+      id: id,
+      title: title,
+      content: content,
+      htmlPath: htmlPath,
+      coverPath: coverPath,
+      sourceUrl: sourceUrl,
+      createdAt: createdAt,
+      categoryId: categoryId,
     );
   }
 }

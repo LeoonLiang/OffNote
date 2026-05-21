@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,18 +10,26 @@ import 'article_snapshot_store.dart';
 import 'js_result_decoder.dart';
 import 'link_parser.dart';
 import 'saved_article.dart';
+import 'saved_category.dart';
 import 'web_navigation_policy.dart';
 
 void main() {
   runApp(const OffNoteApp());
 }
 
-const _ink = Color(0xff17201a);
-const _paper = Color(0xfff7f6f0);
-const _line = Color(0xffddd8cc);
-const _accent = Color(0xff1f7a5a);
-const _accentSoft = Color(0xffdcefe6);
-const _warning = Color(0xffa35c17);
+const _ink = Color(0xff1f241f);
+const _paper = Color(0xfff7f7f3);
+const _accent = Color(0xff49b866);
+const _accentSoft = Color(0xffe6f5ea);
+const _muted = Color(0xff777b76);
+const _folderColors = [
+  0xfff5b744,
+  0xff4e9ff4,
+  0xff51b96b,
+  0xffff6b6b,
+  0xff8c7cf6,
+  0xffff9650,
+];
 
 class OffNoteApp extends StatelessWidget {
   const OffNoteApp({super.key});
@@ -41,37 +50,15 @@ class OffNoteApp extends StatelessWidget {
         appBarTheme: const AppBarTheme(
           backgroundColor: _paper,
           foregroundColor: _ink,
-          centerTitle: false,
+          centerTitle: true,
           elevation: 0,
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.white,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: _line),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: _line),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            backgroundColor: _ink,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: _ink,
-            side: const BorderSide(color: _line),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
           ),
         ),
       ),
@@ -90,80 +77,129 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _store = ArticleSnapshotStore();
   int _index = 0;
+  int _refreshTick = 0;
+
+  void _refresh() => setState(() => _refreshTick++);
+
+  Future<void> _openSaveDialog() async {
+    final article = await showDialog<SavedArticle>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => SaveArticleDialog(store: _store),
+    );
+    if (article == null || !mounted) {
+      return;
+    }
+    _refresh();
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArticleDetailPage(
+          article: article,
+          store: _store,
+          onChanged: _refresh,
+        ),
+      ),
+    );
+    _refresh();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final pages = [
+      ArticleListPage(
+        key: ValueKey('home-$_refreshTick'),
+        title: '全部文章',
+        store: _store,
+        onChanged: _refresh,
+      ),
+      CategoryPage(
+        key: ValueKey('category-$_refreshTick'),
+        store: _store,
+        onChanged: _refresh,
+      ),
+      SearchPage(
+        key: ValueKey('search-$_refreshTick'),
+        store: _store,
+        onChanged: _refresh,
+      ),
+      const ProfilePage(),
+    ];
+
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'OffNote',
-              style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 0),
-            ),
-            Text(
-              '保存网页快照，离线也能看',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Colors.black54,
-                letterSpacing: 0,
+      body: IndexedStack(index: _index, children: pages),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _openSaveDialog,
+        shape: const CircleBorder(),
+        backgroundColor: _accent,
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.add),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      bottomNavigationBar: BottomAppBar(
+        color: Colors.white,
+        elevation: 12,
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 8,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _NavItem(
+                selected: _index == 0,
+                icon: Icons.home_rounded,
+                label: '首页',
+                onTap: () => setState(() => _index = 0),
               ),
-            ),
-          ],
-        ),
-      ),
-      body: IndexedStack(
-        index: _index,
-        children: [
-          CapturePage(store: _store),
-          LibraryPage(store: _store),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        backgroundColor: Colors.white,
-        indicatorColor: _accentSoft,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.add_link), label: '保存'),
-          NavigationDestination(
-            icon: Icon(Icons.archive_outlined),
-            label: '离线',
+              _NavItem(
+                selected: _index == 1,
+                icon: Icons.folder_rounded,
+                label: '分类',
+                onTap: () => setState(() => _index = 1),
+              ),
+              const SizedBox(width: 56),
+              _NavItem(
+                selected: _index == 2,
+                icon: Icons.search_rounded,
+                label: '搜索',
+                onTap: () => setState(() => _index = 2),
+              ),
+              _NavItem(
+                selected: _index == 3,
+                icon: Icons.person_outline_rounded,
+                label: '我的',
+                onTap: () => setState(() => _index = 3),
+              ),
+            ],
           ),
-        ],
-        onDestinationSelected: (index) => setState(() => _index = index),
+        ),
       ),
     );
   }
 }
 
-class CapturePage extends StatefulWidget {
-  const CapturePage({super.key, required this.store});
+class SaveArticleDialog extends StatefulWidget {
+  const SaveArticleDialog({super.key, required this.store});
 
   final ArticleSnapshotStore store;
 
   @override
-  State<CapturePage> createState() => _CapturePageState();
+  State<SaveArticleDialog> createState() => _SaveArticleDialogState();
 }
 
-class _CapturePageState extends State<CapturePage> {
-  final TextEditingController _textController = TextEditingController(
-    text:
-        '格木村，让我来帮你宣传好了！ 徒步格聂扎营格木村 意... http://xhslink.com/o/5ZfJTdyoUMS \n'
-        '小伙伴复制一下，打开【小红书】就能看到内容。',
-  );
-
-  WebViewController? _webViewController;
-  String? _parsedUrl;
+class _SaveArticleDialogState extends State<SaveArticleDialog> {
+  final _textController = TextEditingController();
+  final _steps = <_SaveStep>[
+    _SaveStep('识别链接'),
+    _SaveStep('加载网页'),
+    _SaveStep('提取正文'),
+    _SaveStep('下载图片'),
+    _SaveStep('保存到本地'),
+  ];
+  WebViewController? _controller;
+  Completer<void>? _pageLoaded;
   String? _message;
-  _NoticeKind _messageKind = _NoticeKind.neutral;
-  int _loadingProgress = 0;
   bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _parseOnly();
-  }
 
   @override
   void dispose() {
@@ -171,305 +207,257 @@ class _CapturePageState extends State<CapturePage> {
     super.dispose();
   }
 
-  void _parseOnly() {
-    setState(() {
-      _parsedUrl = extractFirstUrl(_textController.text);
-      if (_parsedUrl == null) {
-        _message = '粘贴分享文本后会自动识别链接';
-        _messageKind = _NoticeKind.warning;
-      } else {
-        _message = null;
-        _messageKind = _NoticeKind.neutral;
-      }
-    });
-  }
-
-  Future<void> _loadParsedUrl() async {
-    final url = extractFirstUrl(_textController.text);
-    if (url == null) {
-      setState(() {
-        _parsedUrl = null;
-        _webViewController = null;
-        _message = '没有识别到链接';
-        _messageKind = _NoticeKind.error;
-      });
+  void _setStep(int index, _StepState state) {
+    if (!mounted) {
       return;
     }
+    setState(() => _steps[index].state = state);
+  }
 
+  Future<void> _save() async {
+    if (_saving) {
+      return;
+    }
+    for (final step in _steps) {
+      step.state = _StepState.waiting;
+    }
     setState(() {
-      _message = '正在加载网页...';
-      _messageKind = _NoticeKind.neutral;
-      _loadingProgress = 0;
+      _saving = true;
+      _message = null;
     });
 
+    try {
+      _setStep(0, _StepState.running);
+      final url = extractFirstUrl(_textController.text);
+      if (url == null) {
+        throw Exception('没有识别到链接');
+      }
+      _setStep(0, _StepState.done);
+
+      _setStep(1, _StepState.running);
+      final controller = await _createController();
+      _controller = controller;
+      _pageLoaded = Completer<void>();
+      await controller.loadRequest(Uri.parse(url));
+      await _pageLoaded!.future.timeout(const Duration(seconds: 35));
+      final sourceUrl = await controller.currentUrl() ?? url;
+      _setStep(1, _StepState.done);
+
+      _setStep(2, _StepState.running);
+      final htmlResult = await controller.runJavaScriptReturningResult(
+        'document.documentElement.outerHTML',
+      );
+      final html = decodeJavaScriptStringResult(htmlResult);
+      _setStep(2, _StepState.done);
+
+      _setStep(3, _StepState.running);
+      _setStep(4, _StepState.running);
+      final article = await widget.store.save(
+        rawHtml: html,
+        sourceUrl: sourceUrl,
+      );
+      _setStep(3, _StepState.done);
+      _setStep(4, _StepState.done);
+
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pop(article);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _message = '保存失败：$error';
+        _saving = false;
+      });
+    }
+  }
+
+  Future<WebViewController> _createController() async {
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (progress) {
-            setState(() => _loadingProgress = progress);
-          },
           onPageFinished: (_) {
-            setState(() {
-              _loadingProgress = 100;
-              _message = '网页已加载，可以保存快照';
-              _messageKind = _NoticeKind.success;
-            });
+            if (_pageLoaded?.isCompleted == false) {
+              _pageLoaded?.complete();
+            }
           },
           onNavigationRequest: (request) {
             final uri = Uri.parse(request.url);
-            if (shouldLoadInWebView(uri)) {
-              return NavigationDecision.navigate;
-            }
-
-            setState(() {
-              _message = '已拦截 App 跳转：${uri.scheme}://';
-              _messageKind = _NoticeKind.warning;
-            });
-            return NavigationDecision.prevent;
+            return shouldLoadInWebView(uri)
+                ? NavigationDecision.navigate
+                : NavigationDecision.prevent;
           },
           onWebResourceError: (error) {
-            setState(() {
-              _message = '${error.errorCode}: ${error.description}';
-              _messageKind = _NoticeKind.error;
-            });
+            if (_pageLoaded?.isCompleted == false &&
+                error.isForMainFrame == true) {
+              _pageLoaded?.completeError(error.description);
+            }
           },
         ),
       );
-
     final platformController = controller.platform;
     if (platformController is AndroidWebViewController) {
       await platformController.setMixedContentMode(
         MixedContentMode.alwaysAllow,
       );
     }
-
-    await controller.loadRequest(Uri.parse(url));
-
-    setState(() {
-      _parsedUrl = url;
-      _webViewController = controller;
-    });
-  }
-
-  Future<void> _saveSnapshot() async {
-    final controller = _webViewController;
-    final sourceUrl = await controller?.currentUrl();
-    if (controller == null || sourceUrl == null) {
-      setState(() {
-        _message = '请先加载网页';
-        _messageKind = _NoticeKind.warning;
-      });
-      return;
-    }
-
-    setState(() {
-      _saving = true;
-      _message = '正在保存网页快照和图片...';
-      _messageKind = _NoticeKind.neutral;
-    });
-
-    try {
-      final htmlResult = await controller.runJavaScriptReturningResult(
-        'document.documentElement.outerHTML',
-      );
-      final article = await widget.store.save(
-        rawHtml: decodeJavaScriptStringResult(htmlResult),
-        sourceUrl: sourceUrl,
-      );
-      setState(() {
-        _message = '已保存：${article.title}';
-        _messageKind = _NoticeKind.success;
-      });
-    } catch (error) {
-      setState(() {
-        _message = '保存失败：$error';
-        _messageKind = _NoticeKind.error;
-      });
-    } finally {
-      setState(() => _saving = false);
-    }
+    return controller;
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = _webViewController;
-
-    return SafeArea(
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-            decoration: const BoxDecoration(
-              color: _paper,
-              border: Border(bottom: BorderSide(color: _line)),
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      title: const Text('保存网页'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _textController,
+              enabled: !_saving,
+              minLines: 3,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: '粘贴小红书分享文本或网页链接',
+                prefixIcon: Icon(Icons.link_rounded),
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _textController,
-                  minLines: 2,
-                  maxLines: 4,
-                  style: const TextStyle(fontSize: 14, height: 1.35),
-                  decoration: const InputDecoration(
-                    labelText: '分享文本或链接',
-                    prefixIcon: Icon(Icons.link),
-                  ),
-                  onChanged: (_) => _parseOnly(),
+            const SizedBox(height: 16),
+            ..._steps.map((step) => _ProgressRow(step: step)),
+            if (_message != null) ...[
+              const SizedBox(height: 12),
+              Text(_message!, style: const TextStyle(color: Colors.redAccent)),
+            ],
+            if (_controller != null)
+              SizedBox.square(
+                dimension: 1,
+                child: Opacity(
+                  opacity: 0.01,
+                  child: WebViewWidget(controller: _controller!),
                 ),
-                const SizedBox(height: 10),
-                _UrlChip(url: _parsedUrl),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _loadParsedUrl,
-                        icon: const Icon(Icons.travel_explore),
-                        label: const Text('加载网页'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.tonalIcon(
-                        onPressed: _saving ? null : _saveSnapshot,
-                        icon: _saving
-                            ? const SizedBox.square(
-                                dimension: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.offline_pin_outlined),
-                        label: const Text('保存快照'),
-                      ),
-                    ),
-                  ],
-                ),
-                if (_message != null) ...[
-                  const SizedBox(height: 10),
-                  _Notice(text: _message!, kind: _messageKind),
-                ],
-              ],
-            ),
-          ),
-          if (controller != null && _loadingProgress < 100)
-            LinearProgressIndicator(value: _loadingProgress / 100),
-          Expanded(
-            child: controller == null
-                ? const _EmptyPreview()
-                : WebViewWidget(controller: controller),
-          ),
-        ],
+              ),
+          ],
+        ),
       ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: _saving
+              ? const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.bookmark_add_rounded),
+          label: const Text('保存'),
+        ),
+      ],
     );
   }
 }
 
-class LibraryPage extends StatefulWidget {
-  const LibraryPage({super.key, required this.store});
+class ArticleListPage extends StatefulWidget {
+  const ArticleListPage({
+    super.key,
+    required this.title,
+    required this.store,
+    required this.onChanged,
+    this.category,
+  });
 
+  final String title;
   final ArticleSnapshotStore store;
+  final SavedCategory? category;
+  final VoidCallback onChanged;
 
   @override
-  State<LibraryPage> createState() => _LibraryPageState();
+  State<ArticleListPage> createState() => _ArticleListPageState();
 }
 
-class _LibraryPageState extends State<LibraryPage> {
-  final _searchController = TextEditingController();
-  late Future<List<SavedArticle>> _articlesFuture;
+class _ArticleListPageState extends State<ArticleListPage> {
+  late Future<List<SavedArticle>> _future;
 
   @override
   void initState() {
     super.initState();
-    _articlesFuture = widget.store.listArticles();
+    _future = _load();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  Future<List<SavedArticle>> _load() {
+    final category = widget.category;
+    if (category != null) {
+      return widget.store.listArticlesByCategory(category.id);
+    }
+    return widget.store.listArticles();
   }
 
   Future<void> _refresh() async {
-    setState(() {
-      _articlesFuture = widget.store.searchArticles(_searchController.text);
-    });
-    await _articlesFuture;
+    setState(() => _future = _load());
+    await _future;
   }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: const InputDecoration(
-                      labelText: '搜索标题或正文',
-                      prefixIcon: Icon(Icons.search),
-                    ),
-                    onSubmitted: (_) => _refresh(),
-                  ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          widget.title,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ),
+      body: SafeArea(
+        child: FutureBuilder<List<SavedArticle>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final articles = snapshot.data ?? const <SavedArticle>[];
+            if (articles.isEmpty) {
+              return const _EmptyLibrary();
+            }
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                itemCount: articles.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
+                itemBuilder: (context, index) => _ArticleTile(
+                  article: articles[index],
+                  onTap: () => _openArticle(articles[index]),
+                  onDelete: () => _confirmDelete(articles[index]),
                 ),
-                const SizedBox(width: 10),
-                IconButton.filledTonal(
-                  onPressed: _refresh,
-                  tooltip: '刷新列表',
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: FutureBuilder<List<SavedArticle>>(
-              future: _articlesFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final articles = snapshot.data ?? const <SavedArticle>[];
-                if (articles.isEmpty) {
-                  return const _EmptyLibrary();
-                }
-
-                return RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-                    itemCount: articles.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final article = articles[index];
-                      return _ArticleTile(
-                        article: article,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  ArticleDetailPage(article: article),
-                            ),
-                          );
-                        },
-                        onDelete: () => _confirmDelete(article),
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+              ),
+            );
+          },
+        ),
       ),
     );
+  }
+
+  Future<void> _openArticle(SavedArticle article) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ArticleDetailPage(
+          article: article,
+          store: widget.store,
+          onChanged: () {
+            widget.onChanged();
+            _refresh();
+          },
+        ),
+      ),
+    );
+    await _refresh();
   }
 
   Future<void> _confirmDelete(SavedArticle article) async {
@@ -490,26 +478,271 @@ class _LibraryPageState extends State<LibraryPage> {
         ],
       ),
     );
-
     if (confirmed != true) {
       return;
     }
-
     await widget.store.deleteArticle(article);
-    if (!mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已删除：${article.title}')));
+    widget.onChanged();
     await _refresh();
   }
 }
 
+class CategoryPage extends StatefulWidget {
+  const CategoryPage({super.key, required this.store, required this.onChanged});
+
+  final ArticleSnapshotStore store;
+  final VoidCallback onChanged;
+
+  @override
+  State<CategoryPage> createState() => _CategoryPageState();
+}
+
+class _CategoryPageState extends State<CategoryPage> {
+  late Future<List<SavedCategory>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = widget.store.listCategories();
+  }
+
+  Future<void> _refresh() async {
+    setState(() => _future = widget.store.listCategories());
+    await _future;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          '分类管理',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        actions: [
+          TextButton(onPressed: _createCategory, child: const Text('新建')),
+        ],
+      ),
+      body: SafeArea(
+        child: FutureBuilder<List<SavedCategory>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final categories = snapshot.data ?? const <SavedCategory>[];
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _createCategory,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('新建文件夹'),
+                ),
+                const SizedBox(height: 12),
+                if (categories.isEmpty)
+                  const _EmptyMessage(
+                    icon: Icons.folder_open_rounded,
+                    text: '还没有分类文件夹',
+                  ),
+                ...categories.map(
+                  (category) => _CategoryTile(
+                    category: category,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => ArticleListPage(
+                          title: category.name,
+                          category: category,
+                          store: widget.store,
+                          onChanged: widget.onChanged,
+                        ),
+                      ),
+                    ),
+                    onRename: () => _renameCategory(category),
+                    onDelete: () => _deleteCategory(category),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createCategory() async {
+    final name = await _askName(title: '新建文件夹', initialValue: '');
+    if (name == null || name.trim().isEmpty) {
+      return;
+    }
+    final color =
+        _folderColors[DateTime.now().millisecond % _folderColors.length];
+    await widget.store.createCategory(name, color);
+    widget.onChanged();
+    await _refresh();
+  }
+
+  Future<void> _renameCategory(SavedCategory category) async {
+    final name = await _askName(title: '重命名文件夹', initialValue: category.name);
+    if (name == null || name.trim().isEmpty) {
+      return;
+    }
+    await widget.store.renameCategory(category.id, name);
+    widget.onChanged();
+    await _refresh();
+  }
+
+  Future<void> _deleteCategory(SavedCategory category) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除分类'),
+        content: Text('删除「${category.name}」后，文章会变为未分类。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await widget.store.deleteCategory(category.id);
+    widget.onChanged();
+    await _refresh();
+  }
+
+  Future<String?> _askName({
+    required String title,
+    required String initialValue,
+  }) {
+    final controller = TextEditingController(text: initialValue);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '文件夹名称'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class SearchPage extends StatefulWidget {
+  const SearchPage({super.key, required this.store, required this.onChanged});
+
+  final ArticleSnapshotStore store;
+  final VoidCallback onChanged;
+
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final _controller = TextEditingController();
+  late Future<List<SavedArticle>> _future = widget.store.listArticles();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _search() =>
+      setState(() => _future = widget.store.searchArticles(_controller.text));
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('搜索', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: TextField(
+                controller: _controller,
+                autofocus: false,
+                decoration: const InputDecoration(
+                  hintText: '搜索标题或正文',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
+                onChanged: (_) => _search(),
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder<List<SavedArticle>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final articles = snapshot.data ?? const <SavedArticle>[];
+                  if (articles.isEmpty) {
+                    return const _EmptyMessage(
+                      icon: Icons.search_off_rounded,
+                      text: '没有找到相关内容',
+                    );
+                  }
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                    itemCount: articles.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) => _ArticleTile(
+                      article: articles[index],
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ArticleDetailPage(
+                            article: articles[index],
+                            store: widget.store,
+                            onChanged: widget.onChanged,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ArticleDetailPage extends StatefulWidget {
-  const ArticleDetailPage({super.key, required this.article});
+  const ArticleDetailPage({
+    super.key,
+    required this.article,
+    required this.store,
+    required this.onChanged,
+  });
 
   final SavedArticle article;
+  final ArticleSnapshotStore store;
+  final VoidCallback onChanged;
 
   @override
   State<ArticleDetailPage> createState() => _ArticleDetailPageState();
@@ -517,6 +750,7 @@ class ArticleDetailPage extends StatefulWidget {
 
 class _ArticleDetailPageState extends State<ArticleDetailPage> {
   late final WebViewController _controller;
+  late SavedArticle _article = widget.article;
 
   @override
   void initState() {
@@ -530,16 +764,21 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.article.title, maxLines: 1),
+        title: Text(_article.title, maxLines: 1),
         actions: [
+          IconButton(
+            onPressed: _chooseCategory,
+            tooltip: '分类',
+            icon: const Icon(Icons.sell_outlined),
+          ),
           IconButton(
             onPressed: _copyHtmlToClipboard,
             tooltip: '复制 HTML',
             icon: const Icon(Icons.code),
           ),
           const Padding(
-            padding: EdgeInsets.only(right: 16),
-            child: Icon(Icons.cloud_off_outlined),
+            padding: EdgeInsets.only(right: 12),
+            child: Icon(Icons.cloud_off_outlined, color: _accent),
           ),
         ],
       ),
@@ -547,9 +786,67 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     );
   }
 
+  Future<void> _chooseCategory() async {
+    final categories = await widget.store.listCategories();
+    if (!mounted) {
+      return;
+    }
+    const uncategorizedValue = '__offnote_uncategorized__';
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text(
+                '选择分类',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            ListTile(
+              leading: Icon(
+                _article.categoryId == null
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: _article.categoryId == null ? _accent : Colors.black26,
+              ),
+              title: const Text('未分类'),
+              onTap: () => Navigator.of(context).pop(uncategorizedValue),
+            ),
+            ...categories.map(
+              (category) => ListTile(
+                leading: Icon(
+                  Icons.folder_rounded,
+                  color: Color(category.color),
+                ),
+                title: Text(category.name),
+                trailing: _article.categoryId == category.id
+                    ? const Icon(Icons.check_rounded, color: _accent)
+                    : null,
+                onTap: () => Navigator.of(context).pop(category.id),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) {
+      return;
+    }
+    final categoryId = selected == uncategorizedValue ? null : selected;
+    if (categoryId == _article.categoryId) {
+      return;
+    }
+    await widget.store.assignArticleCategory(_article.id, categoryId);
+    setState(() => _article = _article.copyWith(categoryId: categoryId));
+    widget.onChanged();
+  }
+
   Future<void> _copyHtmlToClipboard() async {
     try {
-      final html = await File(widget.article.htmlPath).readAsString();
+      final html = await File(_article.htmlPath).readAsString();
       await Clipboard.setData(ClipboardData(text: html));
       if (!mounted) {
         return;
@@ -568,89 +865,101 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   }
 }
 
+class ProfilePage extends StatelessWidget {
+  const ProfilePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('我的', style: TextStyle(fontWeight: FontWeight.w800)),
+      ),
+      body: const _EmptyMessage(
+        icon: Icons.lock_outline_rounded,
+        text: '数据仅保存在本地',
+      ),
+    );
+  }
+}
+
 class _ArticleTile extends StatelessWidget {
   const _ArticleTile({
     required this.article,
     required this.onTap,
-    required this.onDelete,
+    this.onDelete,
   });
 
   final SavedArticle article;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
     final coverPath = article.coverPath;
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: _line),
-            borderRadius: BorderRadius.circular(8),
-          ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
           child: Row(
             children: [
-              SizedBox(
-                width: 92,
-                height: 92,
-                child: coverPath == null
-                    ? const ColoredBox(
-                        color: _accentSoft,
-                        child: Icon(Icons.article_outlined, color: _accent),
-                      )
-                    : Image.file(File(coverPath), fit: BoxFit.cover),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        article.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: _ink,
-                          height: 1.25,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        article.content,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.black54,
-                          fontSize: 12,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 86,
+                  height: 76,
+                  child: coverPath == null
+                      ? const ColoredBox(
+                          color: _accentSoft,
+                          child: Icon(Icons.article_outlined, color: _accent),
+                        )
+                      : Image.file(File(coverPath), fit: BoxFit.cover),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    IconButton(
-                      onPressed: onDelete,
-                      tooltip: '删除',
-                      icon: const Icon(Icons.delete_outline),
-                      color: Colors.black45,
+                    Text(
+                      article.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: _ink,
+                        height: 1.25,
+                      ),
                     ),
-                    const Icon(Icons.chevron_right, color: Colors.black26),
+                    const SizedBox(height: 8),
+                    Text(
+                      article.content,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _muted,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _dateLabel(article.createdAt),
+                      style: const TextStyle(color: _muted, fontSize: 12),
+                    ),
                   ],
                 ),
               ),
+              if (onDelete != null)
+                IconButton(
+                  onPressed: onDelete,
+                  tooltip: '删除',
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  color: Colors.black38,
+                ),
             ],
           ),
         ),
@@ -659,39 +968,82 @@ class _ArticleTile extends StatelessWidget {
   }
 }
 
-class _UrlChip extends StatelessWidget {
-  const _UrlChip({required this.url});
+class _CategoryTile extends StatelessWidget {
+  const _CategoryTile({
+    required this.category,
+    required this.onTap,
+    required this.onRename,
+    required this.onDelete,
+  });
 
-  final String? url;
+  final SavedCategory category;
+  final VoidCallback onTap;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    final hasUrl = url != null;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: hasUrl ? _accentSoft : Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: hasUrl ? _accent : _line),
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: ListTile(
+        onTap: onTap,
+        leading: Icon(
+          Icons.folder_rounded,
+          color: Color(category.color),
+          size: 34,
+        ),
+        title: Text(
+          category.name,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: const Text('文件夹'),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'rename') {
+              onRename();
+            } else if (value == 'delete') {
+              onDelete();
+            }
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: 'rename', child: Text('重命名')),
+            PopupMenuItem(value: 'delete', child: Text('删除')),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _ProgressRow extends StatelessWidget {
+  const _ProgressRow({required this.step});
+
+  final _SaveStep step;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (step.state) {
+      _StepState.waiting => Icons.radio_button_unchecked_rounded,
+      _StepState.running => Icons.downloading_rounded,
+      _StepState.done => Icons.check_circle_rounded,
+    };
+    final color = switch (step.state) {
+      _StepState.waiting => Colors.black26,
+      _StepState.running => _accent,
+      _StepState.done => _accent,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(
-            hasUrl ? Icons.check_circle : Icons.info_outline,
-            size: 18,
-            color: hasUrl ? _accent : Colors.black45,
-          ),
+          Icon(icon, size: 18, color: color),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              hasUrl ? url! : '等待识别链接',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: hasUrl ? _accent : Colors.black54,
-                fontSize: 12,
-              ),
-            ),
+          Text(
+            step.label,
+            style: TextStyle(color: color == _accent ? _ink : _muted),
           ),
         ],
       ),
@@ -699,55 +1051,38 @@ class _UrlChip extends StatelessWidget {
   }
 }
 
-class _Notice extends StatelessWidget {
-  const _Notice({required this.text, required this.kind});
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
-  final String text;
-  final _NoticeKind kind;
-
-  @override
-  Widget build(BuildContext context) {
-    final (color, icon) = switch (kind) {
-      _NoticeKind.success => (_accent, Icons.check_circle_outline),
-      _NoticeKind.warning => (_warning, Icons.info_outline),
-      _NoticeKind.error => (
-        Theme.of(context).colorScheme.error,
-        Icons.error_outline,
-      ),
-      _NoticeKind.neutral => (_ink, Icons.hourglass_empty),
-    };
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(color: color, fontSize: 13, height: 1.3),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _EmptyPreview extends StatelessWidget {
-  const _EmptyPreview();
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(32),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 54,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.web_asset_off_outlined, size: 44, color: Colors.black38),
-            SizedBox(height: 12),
+            Icon(icon, size: 22, color: selected ? _accent : _muted),
+            const SizedBox(height: 3),
             Text(
-              '先加载网页，再保存离线快照',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black54),
+              label,
+              style: TextStyle(
+                color: selected ? _accent : _muted,
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+              ),
             ),
           ],
         ),
@@ -761,23 +1096,30 @@ class _EmptyLibrary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return const _EmptyMessage(icon: Icons.archive_outlined, text: '还没有离线文章');
+  }
+}
+
+class _EmptyMessage extends StatelessWidget {
+  const _EmptyMessage({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.archive_outlined, size: 44, color: Colors.black38),
-            SizedBox(height: 12),
+            Icon(icon, size: 44, color: Colors.black38),
+            const SizedBox(height: 12),
             Text(
-              '还没有离线文章',
-              style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
-            ),
-            SizedBox(height: 6),
-            Text(
-              '保存快照后，文章和图片会出现在这里。',
+              text,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.black54),
+              style: const TextStyle(fontWeight: FontWeight.w700, color: _ink),
             ),
           ],
         ),
@@ -786,4 +1128,15 @@ class _EmptyLibrary extends StatelessWidget {
   }
 }
 
-enum _NoticeKind { neutral, success, warning, error }
+class _SaveStep {
+  _SaveStep(this.label);
+
+  final String label;
+  _StepState state = _StepState.waiting;
+}
+
+enum _StepState { waiting, running, done }
+
+String _dateLabel(DateTime date) {
+  return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+}

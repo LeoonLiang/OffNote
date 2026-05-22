@@ -44,7 +44,7 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
   }
 
   final title = _stringValue(note['title']) ?? _titleFromHtml(html);
-  final content = _stringValue(note['desc']) ?? _descriptionFromHtml(html);
+  final content = _contentStringValue(note['desc']) ?? _descriptionFromHtml(html);
   final user = note['user'] is Map ? note['user'] as Map : null;
   final authorName =
       _stringValue(user?['nickName']) ??
@@ -97,9 +97,12 @@ XhsNoteSnapshot? _parseRenderedNoteSnapshot({
   final title =
       _textFromSelector(document, '.title') ??
       _titleFromHtml(html)?.replaceFirst(RegExp(r'\s*-\s*小红书$'), '');
+  final jsonState = _decodeInitialState(html);
+  final jsonNote = jsonState != null ? _findNoteMap(jsonState) : null;
   final content =
-      _textFromSelector(document, '.note-content') ??
-      _textFromSelector(document, '.desc') ??
+      (jsonNote != null ? _contentStringValue(jsonNote['desc']) : null) ??
+      _contentFromSelector(document, '.note-content') ??
+      _contentFromSelector(document, '.desc') ??
       _descriptionFromHtml(html);
   final authorName =
       _textFromSelector(document, '.author-wrapper .name') ??
@@ -140,7 +143,13 @@ Map<String, dynamic>? _decodeInitialState(String html) {
     return null;
   }
 
-  final rawJson = html.substring(jsonStart, jsonEnd).trim();
+  // XHS embeds JavaScript (not strict JSON) — replace JS-only literals.
+  final rawJson = html
+      .substring(jsonStart, jsonEnd)
+      .trim()
+      .replaceAll(RegExp(r'\bundefined\b'), 'null')
+      .replaceAll(RegExp(r'\bNaN\b'), 'null')
+      .replaceAll(RegExp(r'\bInfinity\b'), 'null');
   try {
     final value = jsonDecode(rawJson);
     return value is Map<String, dynamic> ? value : null;
@@ -225,6 +234,35 @@ String? _stringValue(Object? value) {
   }
   final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   return normalized.isEmpty ? null : normalized;
+}
+
+// Like _stringValue but preserves newlines — used for note body text.
+// XHS stores line breaks as \n in the JSON desc field.
+String? _contentStringValue(Object? value) {
+  if (value is! String) return null;
+  final normalized = value
+      .replaceAll('\t', '') // XHS uses \t as blank-line filler — discard
+      .replaceAll(RegExp(r'[ \u00A0]+'), ' ') // collapse runs of spaces/NBSP
+      .replaceAll(RegExp(r' *\n *'), '\n') // trim spaces around newlines
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n') // cap consecutive blank lines
+      .trim();
+  return normalized.isEmpty ? null : normalized;
+}
+
+// Like _textFromSelector but preserves line breaks by converting <br> to \n.
+String? _contentFromSelector(dom.Document document, String selector) {
+  final element = document.querySelector(selector);
+  if (element == null) return null;
+  for (final br in element.querySelectorAll('br').toList()) {
+    br.replaceWith(dom.Text('\n'));
+  }
+  final text = element.text
+      .replaceAll('\t', '')
+      .replaceAll(RegExp(r'[ \u00A0]+'), ' ')
+      .replaceAll(RegExp(r' *\n *'), '\n')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+  return text.isEmpty ? null : text;
 }
 
 String? _titleFromHtml(String html) {

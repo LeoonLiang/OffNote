@@ -84,18 +84,78 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _store = ArticleSnapshotStore();
   int _index = 0;
   int _refreshTick = 0;
+  String? _lastClipboard;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkClipboard());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkClipboard();
+  }
 
   void _refresh() => setState(() => _refreshTick++);
 
-  Future<void> _openSaveDialog() async {
+  bool _isXhsUrl(String url) {
+    final host = Uri.tryParse(url)?.host ?? '';
+    return host == 'xhslink.com' ||
+        host == 'xiaohongshu.com' ||
+        host.endsWith('.xiaohongshu.com');
+  }
+
+  Future<void> _checkClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty || text == _lastClipboard) return;
+    final url = extractFirstUrl(text);
+    if (url == null || !_isXhsUrl(url)) return;
+    if (!mounted) return;
+    _lastClipboard = text;
+    _showClipboardPrompt(text);
+  }
+
+  void _showClipboardPrompt(String clipText) {
+    showShadDialog<void>(
+      context: context,
+      builder: (_) => ShadDialog.alert(
+        title: const Text('检测到小红书链接'),
+        description: const Text('发现剪贴板中有小红书内容，是否直接保存？'),
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('忽略'),
+          ),
+          ShadButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _openSaveDialog(initialText: clipText);
+            },
+            child: const Text('立即保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openSaveDialog({String? initialText}) async {
     final article = await showShadDialog<SavedArticle>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => SaveArticleDialog(store: _store),
+      builder: (_) => SaveArticleDialog(store: _store, initialText: initialText),
     );
     if (article == null || !mounted) {
       return;
@@ -189,9 +249,10 @@ class _HomePageState extends State<HomePage> {
 }
 
 class SaveArticleDialog extends StatefulWidget {
-  const SaveArticleDialog({super.key, required this.store});
+  const SaveArticleDialog({super.key, required this.store, this.initialText});
 
   final ArticleSnapshotStore store;
+  final String? initialText;
 
   @override
   State<SaveArticleDialog> createState() => _SaveArticleDialogState();
@@ -206,11 +267,18 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     _SaveStep('下载图片'),
     _SaveStep('保存到本地'),
   ];
-  WebViewController? _controller;
   Completer<void>? _pageLoaded;
   String? _message;
-  int _pageProgress = 0;
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialText;
+    if (initial != null && initial.isNotEmpty) {
+      _textController.text = initial;
+    }
+  }
 
   @override
   void dispose() {
@@ -235,7 +303,6 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     setState(() {
       _saving = true;
       _message = null;
-      _pageProgress = 0;
     });
 
     try {
@@ -249,7 +316,6 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
       _setStep(1, _StepState.running);
       final controller = await _createController();
       _pageLoaded = Completer<void>();
-      setState(() => _controller = controller);
       await controller.loadRequest(Uri.parse(url));
       await _pageLoaded!.future.timeout(const Duration(seconds: 35));
       setState(() => _message = '网页已打开，正在等待正文和图片渲染完整...');
@@ -310,11 +376,7 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (progress) {
-            if (mounted) {
-              setState(() => _pageProgress = progress);
-            }
-          },
+          onProgress: (_) {},
           onPageFinished: (_) {
             if (_pageLoaded?.isCompleted == false) {
               _pageLoaded?.complete();
@@ -345,55 +407,69 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
-    final theme = ShadTheme.of(context);
     return ShadDialog(
       title: const Text('保存网页'),
-      description: const Text('粘贴链接后会先加载网页，确认正文和图片就绪，再生成离线快照。'),
+      description: const Text('网页将被转为离线快照永久保存到本地。'),
       closeIcon: ShadIconButton.ghost(
         enabled: !_saving,
         icon: const Icon(LucideIcons.x),
         onPressed: _saving ? null : () => Navigator.of(context).pop(),
       ),
-      constraints: const BoxConstraints(maxWidth: 540),
-      radius: BorderRadius.circular(24),
-      padding: const EdgeInsets.all(20),
-      gap: 14,
+      constraints: const BoxConstraints(maxWidth: 480),
+      radius: BorderRadius.circular(20),
+      padding: const EdgeInsets.all(24),
+      gap: 16,
       child: SizedBox(
-        width: 520,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 680),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('分享文本或网页链接', style: theme.textTheme.small),
-                const SizedBox(height: 8),
-                ShadTextarea(
-                  controller: _textController,
-                  enabled: !_saving,
-                  placeholder: const Text('粘贴小红书分享文本或网页链接'),
-                  minHeight: 106,
-                  maxHeight: 142,
-                  resizable: false,
-                  leading: const Padding(
-                    padding: EdgeInsets.only(top: 2),
-                    child: Icon(LucideIcons.link, size: 18),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                ShadCard(
-                  padding: const EdgeInsets.all(14),
-                  backgroundColor: _paper,
-                  radius: BorderRadius.circular(18),
-                  child: Column(
-                    children: [
-                      ..._steps.map((step) => _ProgressRow(step: step)),
-                      if (_message != null) ...[
-                        const SizedBox(height: 10),
-                        Align(
-                          alignment: Alignment.centerLeft,
+        width: 460,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ShadTextarea(
+              controller: _textController,
+              enabled: !_saving,
+              placeholder: const Text('粘贴小红书分享文本或网页链接'),
+              minHeight: 80,
+              maxHeight: 116,
+              resizable: false,
+              leading: const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(LucideIcons.link, size: 16),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _paper,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                children: [
+                  ..._steps.map((step) => _ProgressRow(step: step)),
+                  if (_message != null) ...[
+                    const Divider(
+                      height: 18,
+                      thickness: 1,
+                      color: Color(0xffe8ebe2),
+                    ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 1),
+                          child: Icon(
+                            _message!.startsWith('保存失败')
+                                ? LucideIcons.circleAlert
+                                : LucideIcons.info,
+                            size: 13,
+                            color: _message!.startsWith('保存失败')
+                                ? Colors.redAccent
+                                : _muted,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
                           child: Text(
                             _message!,
                             style: TextStyle(
@@ -401,123 +477,50 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
                                   ? Colors.redAccent
                                   : _muted,
                               fontSize: 12,
-                              height: 1.35,
+                              height: 1.45,
                             ),
                           ),
                         ),
                       ],
-                    ],
-                  ),
-                ),
-                if (controller != null) ...[
-                  const SizedBox(height: 14),
-                  ShadCard(
-                    padding: EdgeInsets.zero,
-                    radius: BorderRadius.circular(18),
-                    child: _WebPreviewFrame(
-                      controller: controller,
-                      progress: _pageProgress,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ShadButton.outline(
-                        onPressed: _saving
-                            ? null
-                            : () => Navigator.of(context).pop(),
-                        height: 46,
-                        enabled: !_saving,
-                        width: double.infinity,
-                        child: const Text('取消'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ShadButton(
-                        onPressed: _saving ? null : _save,
-                        enabled: !_saving,
-                        height: 46,
-                        width: double.infinity,
-                        leading: _saving
-                            ? const SizedBox.square(
-                                dimension: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(LucideIcons.bookMarked, size: 17),
-                        child: Text(_saving ? '保存中' : '解析并保存'),
-                      ),
                     ),
                   ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: ShadButton.outline(
+                    onPressed:
+                        _saving ? null : () => Navigator.of(context).pop(),
+                    height: 44,
+                    enabled: !_saving,
+                    width: double.infinity,
+                    child: const Text('取消'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ShadButton(
+                    onPressed: _saving ? null : _save,
+                    enabled: !_saving,
+                    height: 44,
+                    width: double.infinity,
+                    leading: _saving
+                        ? const SizedBox.square(
+                            dimension: 15,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(LucideIcons.bookMarked, size: 16),
+                    child: Text(_saving ? '保存中...' : '解析并保存'),
+                  ),
                 ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _WebPreviewFrame extends StatelessWidget {
-  const _WebPreviewFrame({required this.controller, required this.progress});
-
-  final WebViewController controller;
-  final int progress;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 280,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(17),
-        child: Column(
-          children: [
-            Container(
-              height: 38,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: const BoxDecoration(
-                color: _paper,
-                border: Border(bottom: BorderSide(color: Color(0xffe3e5dc))),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.language_rounded, size: 17, color: _muted),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      '加载预览',
-                      style: TextStyle(
-                        color: _muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '${progress.clamp(0, 100)}%',
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (progress < 100)
-              ShadProgress(
-                value: progress <= 0 ? null : progress / 100,
-                minHeight: 2,
-                backgroundColor: Colors.transparent,
-                color: _accent,
-              ),
-            Expanded(child: WebViewWidget(controller: controller)),
           ],
         ),
       ),
@@ -532,38 +535,44 @@ class _ProgressRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (step.state) {
-      _StepState.done => _accent,
-      _StepState.running => _accent,
-      _StepState.waiting => const Color(0xffc8cbc1),
-    };
-    final icon = switch (step.state) {
-      _StepState.done => Icons.check_circle_rounded,
-      _StepState.running => Icons.radio_button_checked_rounded,
-      _StepState.waiting => Icons.circle_outlined,
-    };
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+    final isDone = step.state == _StepState.done;
+    final isRunning = step.state == _StepState.running;
+    final isWaiting = step.state == _StepState.waiting;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: isRunning ? _accentSoft : Colors.transparent,
+        borderRadius: BorderRadius.circular(9),
+      ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 18),
+          SizedBox.square(
+            dimension: 18,
+            child: isRunning
+                ? CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _accent,
+                  )
+                : Icon(
+                    isDone
+                        ? Icons.check_circle_rounded
+                        : Icons.circle_outlined,
+                    size: 18,
+                    color: isDone ? _accent : const Color(0xffc8cbc1),
+                  ),
+          ),
           const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              step.label,
-              style: TextStyle(
-                color: step.state == _StepState.waiting ? _muted : _ink,
-                fontWeight: step.state == _StepState.waiting
-                    ? FontWeight.w500
-                    : FontWeight.w800,
-              ),
+          Text(
+            step.label,
+            style: TextStyle(
+              fontSize: 13.5,
+              color: isWaiting ? const Color(0xffb0b5ae) : _ink,
+              fontWeight: isRunning ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
-          if (step.state == _StepState.running)
-            const SizedBox.square(
-              dimension: 15,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
         ],
       ),
     );
@@ -884,19 +893,41 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
-  late Future<List<SavedArticle>> _future = widget.store.listArticles();
+  Timer? _debounce;
+  List<SavedArticle> _results = const [];
+  bool _isInitialLoad = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAll();
+  }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  void _search() =>
-      setState(() => _future = widget.store.searchArticles(_controller.text));
+  Future<void> _loadAll() async {
+    final results = await widget.store.listArticles();
+    if (mounted) setState(() { _results = results; _isInitialLoad = false; });
+  }
+
+  void _onQueryChanged(String _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), _runSearch);
+  }
+
+  Future<void> _runSearch() async {
+    final results = await widget.store.searchArticles(_controller.text);
+    if (mounted) setState(() => _results = results);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final hasQuery = _controller.text.isNotEmpty;
     return Scaffold(
       appBar: AppBar(
         title: const Text('搜索', style: TextStyle(fontWeight: FontWeight.w800)),
@@ -908,45 +939,40 @@ class _SearchPageState extends State<SearchPage> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: ShadInput(
                 controller: _controller,
-                autofocus: false,
+                autofocus: true,
                 placeholder: const Text('搜索标题或正文'),
                 leading: const Icon(LucideIcons.search, size: 18),
-                onChanged: (_) => _search(),
+                onChanged: _onQueryChanged,
               ),
             ),
             Expanded(
-              child: FutureBuilder<List<SavedArticle>>(
-                future: _future,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final articles = snapshot.data ?? const <SavedArticle>[];
-                  if (articles.isEmpty) {
-                    return const _EmptyMessage(
-                      icon: Icons.search_off_rounded,
-                      text: '没有找到相关内容',
-                    );
-                  }
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                    itemCount: articles.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) => _ArticleTile(
-                      article: articles[index],
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => ArticleDetailPage(
-                            article: articles[index],
-                            store: widget.store,
-                            onChanged: widget.onChanged,
+              child: _isInitialLoad
+                  ? const Center(child: CircularProgressIndicator())
+                  : _results.isEmpty
+                      ? _EmptyMessage(
+                          icon: hasQuery
+                              ? Icons.search_off_rounded
+                              : Icons.bookmarks_outlined,
+                          text: hasQuery ? '没有找到相关内容' : '还没有保存任何文章',
+                        )
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                          itemCount: _results.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) => _ArticleTile(
+                            article: _results[index],
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => ArticleDetailPage(
+                                  article: _results[index],
+                                  store: widget.store,
+                                  onChanged: widget.onChanged,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  );
-                },
-              ),
             ),
           ],
         ),

@@ -81,6 +81,9 @@ class ArticleSnapshotStore {
             (localImages.isEmpty ? null : localImages.first.path),
         sourceUrl: sourceUrl,
         createdAt: DateTime.now(),
+        mediaType: snapshot.videoUrl == null
+            ? ArticleMediaType.image
+            : ArticleMediaType.video,
       );
       await _database.upsertArticle(article);
       debugPrint(

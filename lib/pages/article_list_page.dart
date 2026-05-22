@@ -7,18 +7,22 @@ class ArticleListPage extends StatefulWidget {
     required this.store,
     required this.onChanged,
     this.category,
+    this.searchable = false,
   });
 
   final String title;
   final ArticleSnapshotStore store;
   final SavedCategory? category;
   final VoidCallback onChanged;
+  final bool searchable;
 
   @override
   State<ArticleListPage> createState() => _ArticleListPageState();
 }
 
 class _ArticleListPageState extends State<ArticleListPage> {
+  final _searchController = TextEditingController();
+  Timer? _searchDebounce;
   late Future<List<SavedArticle>> _future;
 
   @override
@@ -27,10 +31,21 @@ class _ArticleListPageState extends State<ArticleListPage> {
     _future = _load();
   }
 
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<List<SavedArticle>> _load() {
     final category = widget.category;
     if (category != null) {
       return widget.store.listArticlesByCategory(category.id);
+    }
+    final query = _searchController.text.trim();
+    if (widget.searchable && query.isNotEmpty) {
+      return widget.store.searchArticles(query);
     }
     return widget.store.listArticles();
   }
@@ -38,6 +53,11 @@ class _ArticleListPageState extends State<ArticleListPage> {
   Future<void> _refresh() async {
     setState(() => _future = _load());
     await _future;
+  }
+
+  void _onSearchChanged(String _) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), _refresh);
   }
 
   @override
@@ -50,30 +70,52 @@ class _ArticleListPageState extends State<ArticleListPage> {
         ),
       ),
       body: SafeArea(
-        child: FutureBuilder<List<SavedArticle>>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final articles = snapshot.data ?? const <SavedArticle>[];
-            if (articles.isEmpty) {
-              return const _EmptyLibrary();
-            }
-            return RefreshIndicator(
-              onRefresh: _refresh,
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-                itemCount: articles.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => _ArticleTile(
-                  article: articles[index],
-                  onTap: () => _openArticle(articles[index]),
-                  onDelete: () => _confirmDelete(articles[index]),
+        child: Column(
+          children: [
+            if (widget.searchable)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: ShadInput(
+                  controller: _searchController,
+                  placeholder: const Text('搜索标题或正文'),
+                  leading: const Icon(LucideIcons.search, size: 18),
+                  onChanged: _onSearchChanged,
                 ),
               ),
-            );
-          },
+            Expanded(
+              child: FutureBuilder<List<SavedArticle>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final articles = snapshot.data ?? const <SavedArticle>[];
+                  if (articles.isEmpty) {
+                    final hasQuery = _searchController.text.trim().isNotEmpty;
+                    return hasQuery
+                        ? const _EmptyMessage(
+                            icon: Icons.search_off_rounded,
+                            text: '没有找到相关内容',
+                          )
+                        : const _EmptyLibrary();
+                  }
+                  return RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                      itemCount: articles.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) => _ArticleTile(
+                        article: articles[index],
+                        onTap: () => _openArticle(articles[index]),
+                        onDelete: () => _confirmDelete(articles[index]),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

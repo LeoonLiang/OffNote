@@ -1,3 +1,19 @@
+enum ArticleMediaType {
+  image('image'),
+  video('video');
+
+  const ArticleMediaType(this.value);
+
+  final String value;
+
+  static ArticleMediaType fromValue(Object? value) {
+    return ArticleMediaType.values.firstWhere(
+      (type) => type.value == value,
+      orElse: () => ArticleMediaType.image,
+    );
+  }
+}
+
 class SavedArticle {
   const SavedArticle({
     required this.id,
@@ -7,6 +23,7 @@ class SavedArticle {
     required this.coverPath,
     required this.sourceUrl,
     required this.createdAt,
+    this.mediaType = ArticleMediaType.image,
     this.categoryId,
   });
 
@@ -17,6 +34,7 @@ class SavedArticle {
   final String? coverPath;
   final String sourceUrl;
   final DateTime createdAt;
+  final ArticleMediaType mediaType;
   final String? categoryId;
 
   Map<String, Object?> toMap() {
@@ -28,6 +46,7 @@ class SavedArticle {
       'cover_path': coverPath,
       'source_url': sourceUrl,
       'created_at': createdAt.millisecondsSinceEpoch,
+      'media_type': mediaType.value,
       'category_id': categoryId,
     };
   }
@@ -41,6 +60,7 @@ class SavedArticle {
       coverPath: map['cover_path'] as String?,
       sourceUrl: map['source_url'] as String? ?? '',
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
+      mediaType: ArticleMediaType.fromValue(map['media_type']),
       categoryId: map['category_id'] as String?,
     );
   }
@@ -54,6 +74,7 @@ class SavedArticle {
       coverPath: coverPath,
       sourceUrl: sourceUrl,
       createdAt: createdAt,
+      mediaType: mediaType,
       categoryId: categoryId,
     );
   }

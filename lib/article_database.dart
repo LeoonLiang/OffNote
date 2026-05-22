@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -30,7 +32,7 @@ class ArticleDatabase {
     final database = await (_databaseFactory ?? databaseFactory).openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onCreate: (db, version) async {
           await _createSchema(db);
           await _tryCreateArticleFtsSchema(db);
@@ -61,6 +63,10 @@ class ArticleDatabase {
               await _rebuildArticleFts(db);
             }
           }
+          if (oldVersion < 4) {
+            await _addMediaTypeColumn(db);
+            await _backfillArticleMediaTypes(db);
+          }
         },
       ),
     );
@@ -84,6 +90,7 @@ class ArticleDatabase {
         cover_path TEXT,
         source_url TEXT,
         created_at INTEGER,
+        media_type TEXT NOT NULL DEFAULT 'image',
         category_id TEXT
       )
     ''');
@@ -154,6 +161,46 @@ class ArticleDatabase {
       INSERT INTO articles_fts(id, title, content)
       SELECT id, COALESCE(title, ''), COALESCE(content, '') FROM articles
     ''');
+  }
+
+  Future<void> _addMediaTypeColumn(DatabaseExecutor db) async {
+    await db.execute(
+      "ALTER TABLE articles ADD COLUMN media_type TEXT NOT NULL DEFAULT 'image'",
+    );
+  }
+
+  Future<void> _backfillArticleMediaTypes(DatabaseExecutor db) async {
+    final rows = await db.query('articles', columns: ['id', 'html_path']);
+    for (final row in rows) {
+      final id = row['id'] as String?;
+      final htmlPath = row['html_path'] as String?;
+      if (id == null || htmlPath == null) {
+        continue;
+      }
+      final mediaType = _inferMediaTypeFromHtmlPath(htmlPath);
+      await db.update(
+        'articles',
+        {'media_type': mediaType.value},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+  }
+
+  ArticleMediaType _inferMediaTypeFromHtmlPath(String htmlPath) {
+    try {
+      final file = File(htmlPath);
+      if (!file.existsSync()) {
+        return ArticleMediaType.image;
+      }
+      final html = file.readAsStringSync().toLowerCase();
+      if (html.contains('<video') || html.contains('video-player')) {
+        return ArticleMediaType.video;
+      }
+    } catch (_) {
+      return ArticleMediaType.image;
+    }
+    return ArticleMediaType.image;
   }
 
   Future<void> upsertArticle(SavedArticle article) async {

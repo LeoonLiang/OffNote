@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offnote/article_database.dart';
 import 'package:offnote/saved_article.dart';
@@ -18,6 +20,7 @@ void main() {
     required String id,
     required String title,
     required String content,
+    ArticleMediaType mediaType = ArticleMediaType.image,
     int createdAt = 1000,
   }) {
     return SavedArticle(
@@ -28,6 +31,7 @@ void main() {
       coverPath: null,
       sourceUrl: 'https://example.com/$id',
       createdAt: DateTime.fromMillisecondsSinceEpoch(createdAt),
+      mediaType: mediaType,
     );
   }
 
@@ -55,6 +59,24 @@ void main() {
 
     final results = await db.searchArticles('雪山');
     expect(results.map((article) => article.id), ['a1']);
+  });
+
+  test('persists article media type', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(
+        id: 'video',
+        title: '视频笔记',
+        content: '本地视频',
+        mediaType: ArticleMediaType.video,
+      ),
+    );
+
+    final saved = (await db.listArticles()).firstWhere(
+      (article) => article.id == 'video',
+    );
+    expect(saved.mediaType, ArticleMediaType.video);
   });
 
   test(
@@ -149,6 +171,83 @@ void main() {
       final migratedDb = await openTestDatabase(dbPath);
 
       expect((await migratedDb.searchArticles('格聂')).single.id, 'legacy');
+    },
+  );
+
+  test(
+    'migrates a v3 database and infers media type from saved html',
+    () async {
+      final path = await databaseFactory.getDatabasesPath();
+      final dbPath = '$path/offnote-media-type-migration-test.db';
+      await databaseFactory.deleteDatabase(dbPath);
+
+      final imageHtml = File('$path/legacy-image.html');
+      final videoHtml = File('$path/legacy-video.html');
+      await imageHtml.writeAsString(
+        '<html><body><img src="a.jpg"></body></html>',
+      );
+      await videoHtml.writeAsString(
+        '<html><body><video class="video-player"></video></body></html>',
+      );
+
+      final legacyDb = await databaseFactory.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 3,
+          onCreate: (db, version) async {
+            await db.execute('''
+            CREATE TABLE articles (
+              id TEXT PRIMARY KEY,
+              title TEXT,
+              content TEXT,
+              html_path TEXT,
+              cover_path TEXT,
+              source_url TEXT,
+              created_at INTEGER,
+              category_id TEXT
+            )
+          ''');
+            await db.execute('''
+            CREATE TABLE categories (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              color INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+            await db.insert('articles', {
+              'id': 'image',
+              'title': '旧图文',
+              'content': '图片内容',
+              'html_path': imageHtml.path,
+              'cover_path': null,
+              'source_url': 'https://example.com/image',
+              'created_at': 1000,
+              'category_id': null,
+            });
+            await db.insert('articles', {
+              'id': 'video',
+              'title': '旧视频',
+              'content': '视频内容',
+              'html_path': videoHtml.path,
+              'cover_path': null,
+              'source_url': 'https://example.com/video',
+              'created_at': 2000,
+              'category_id': null,
+            });
+          },
+        ),
+      );
+      await legacyDb.close();
+
+      final migratedDb = await openTestDatabase(dbPath);
+      final articles = await migratedDb.listArticles();
+
+      final mediaTypesById = {
+        for (final article in articles) article.id: article.mediaType,
+      };
+      expect(mediaTypesById['image'], ArticleMediaType.image);
+      expect(mediaTypesById['video'], ArticleMediaType.video);
     },
   );
 }

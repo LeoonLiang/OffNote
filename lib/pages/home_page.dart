@@ -154,18 +154,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         title: '全部文章',
         store: _store,
         onChanged: _refresh,
+        searchable: true,
       ),
       CategoryPage(
         key: ValueKey('category-$_refreshTick'),
         store: _store,
         onChanged: _refresh,
       ),
-      SearchPage(
-        key: ValueKey('search-$_refreshTick'),
-        store: _store,
-        onChanged: _refresh,
-      ),
-      const ProfilePage(),
     ];
 
     return Scaffold(
@@ -194,24 +189,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 label: '首页',
                 onTap: () => setState(() => _index = 0),
               ),
+              const SizedBox(width: 56),
               _NavItem(
                 selected: _index == 1,
                 icon: Icons.folder_rounded,
                 label: '分类',
                 onTap: () => setState(() => _index = 1),
-              ),
-              const SizedBox(width: 56),
-              _NavItem(
-                selected: _index == 2,
-                icon: Icons.search_rounded,
-                label: '搜索',
-                onTap: () => setState(() => _index = 2),
-              ),
-              _NavItem(
-                selected: _index == 3,
-                icon: Icons.person_outline_rounded,
-                label: '我的',
-                onTap: () => setState(() => _index = 3),
               ),
             ],
           ),

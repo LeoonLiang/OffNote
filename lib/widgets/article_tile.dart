@@ -15,6 +15,7 @@ class _ArticleTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final coverPath = article.coverPath;
     final theme = ShadTheme.of(context);
+    final isVideo = article.mediaType == ArticleMediaType.video;
     return ShadCard(
       padding: EdgeInsets.zero,
       radius: BorderRadius.circular(18),
@@ -39,9 +40,14 @@ class _ArticleTile extends StatelessWidget {
                   width: 86,
                   height: 76,
                   child: coverPath == null
-                      ? const ColoredBox(
+                      ? ColoredBox(
                           color: _accentSoft,
-                          child: Icon(Icons.article_outlined, color: _accent),
+                          child: Icon(
+                            isVideo
+                                ? Icons.play_circle_outline_rounded
+                                : Icons.article_outlined,
+                            color: _accent,
+                          ),
                         )
                       : Image.file(File(coverPath), fit: BoxFit.cover),
                 ),
@@ -73,9 +79,15 @@ class _ArticleTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      _dateLabel(article.createdAt),
-                      style: const TextStyle(color: _muted, fontSize: 12),
+                    Row(
+                      children: [
+                        _MediaTypeBadge(mediaType: article.mediaType),
+                        const SizedBox(width: 8),
+                        Text(
+                          _dateLabel(article.createdAt),
+                          style: const TextStyle(color: _muted, fontSize: 12),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -89,6 +101,44 @@ class _ArticleTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MediaTypeBadge extends StatelessWidget {
+  const _MediaTypeBadge({required this.mediaType});
+
+  final ArticleMediaType mediaType;
+
+  @override
+  Widget build(BuildContext context) {
+    final isVideo = mediaType == ArticleMediaType.video;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: isVideo ? const Color(0xffffeff2) : _accentSoft,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isVideo ? Icons.play_arrow_rounded : Icons.image_outlined,
+            size: 12,
+            color: isVideo ? const Color(0xffff2442) : _accent,
+          ),
+          const SizedBox(width: 3),
+          Text(
+            isVideo ? '视频' : '图文',
+            style: TextStyle(
+              color: isVideo ? const Color(0xffff2442) : _accent,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              height: 1,
+            ),
+          ),
+        ],
       ),
     );
   }

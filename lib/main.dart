@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -10,6 +11,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'article_snapshot_store.dart';
 import 'js_result_decoder.dart';
 import 'link_parser.dart';
+import 'save_failure_message.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 import 'snapshot_readiness.dart';
@@ -89,17 +91,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _index = 0;
   int _refreshTick = 0;
   String? _lastClipboard;
+  String? _lastSharedText;
+  StreamSubscription<List<SharedMediaFile>>? _shareSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkClipboard());
+    _shareSubscription = ReceiveSharingIntent.instance.getMediaStream().listen(
+      _handleSharedMedia,
+      onError: (Object error) {
+        debugPrint('Receive share stream failed: $error');
+      },
+    );
+    _loadInitialSharedMedia();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _shareSubscription?.cancel();
     super.dispose();
   }
 
@@ -126,6 +138,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (!mounted) return;
     _lastClipboard = text;
     _showClipboardPrompt(text);
+  }
+
+  Future<void> _loadInitialSharedMedia() async {
+    try {
+      final media = await ReceiveSharingIntent.instance.getInitialMedia();
+      await _handleSharedMedia(media);
+      await ReceiveSharingIntent.instance.reset();
+    } catch (error) {
+      debugPrint('Load initial shared media failed: $error');
+    }
+  }
+
+  Future<void> _handleSharedMedia(List<SharedMediaFile> media) async {
+    final text = _textFromSharedMedia(media);
+    if (text == null || text == _lastSharedText) {
+      return;
+    }
+    final url = extractFirstUrl(text);
+    if (url == null || !_isXhsUrl(url)) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    _lastSharedText = text;
+    await _openSaveDialog(initialText: text);
+  }
+
+  String? _textFromSharedMedia(List<SharedMediaFile> media) {
+    for (final file in media) {
+      final candidates = [file.message, file.path];
+      for (final candidate in candidates) {
+        final text = candidate?.trim();
+        if (text != null && text.isNotEmpty && extractFirstUrl(text) != null) {
+          return text;
+        }
+      }
+    }
+    return null;
   }
 
   void _showClipboardPrompt(String clipText) {
@@ -155,7 +206,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final article = await showShadDialog<SavedArticle>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => SaveArticleDialog(store: _store, initialText: initialText),
+      builder: (_) =>
+          SaveArticleDialog(store: _store, initialText: initialText),
     );
     if (article == null || !mounted) {
       return;
@@ -349,7 +401,7 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
         return;
       }
       setState(() {
-        _message = '保存失败：$error';
+        _message = describeSaveFailure(error);
         _saving = false;
       });
     }
@@ -492,8 +544,9 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
               children: [
                 Expanded(
                   child: ShadButton.outline(
-                    onPressed:
-                        _saving ? null : () => Navigator.of(context).pop(),
+                    onPressed: _saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     height: 44,
                     enabled: !_saving,
                     width: double.infinity,
@@ -552,14 +605,9 @@ class _ProgressRow extends StatelessWidget {
           SizedBox.square(
             dimension: 18,
             child: isRunning
-                ? CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: _accent,
-                  )
+                ? CircularProgressIndicator(strokeWidth: 2, color: _accent)
                 : Icon(
-                    isDone
-                        ? Icons.check_circle_rounded
-                        : Icons.circle_outlined,
+                    isDone ? Icons.check_circle_rounded : Icons.circle_outlined,
                     size: 18,
                     color: isDone ? _accent : const Color(0xffc8cbc1),
                   ),
@@ -912,7 +960,12 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _loadAll() async {
     final results = await widget.store.listArticles();
-    if (mounted) setState(() { _results = results; _isInitialLoad = false; });
+    if (mounted) {
+      setState(() {
+        _results = results;
+        _isInitialLoad = false;
+      });
+    }
   }
 
   void _onQueryChanged(String _) {
@@ -949,30 +1002,29 @@ class _SearchPageState extends State<SearchPage> {
               child: _isInitialLoad
                   ? const Center(child: CircularProgressIndicator())
                   : _results.isEmpty
-                      ? _EmptyMessage(
-                          icon: hasQuery
-                              ? Icons.search_off_rounded
-                              : Icons.bookmarks_outlined,
-                          text: hasQuery ? '没有找到相关内容' : '还没有保存任何文章',
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                          itemCount: _results.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: 12),
-                          itemBuilder: (context, index) => _ArticleTile(
-                            article: _results[index],
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => ArticleDetailPage(
-                                  article: _results[index],
-                                  store: widget.store,
-                                  onChanged: widget.onChanged,
-                                ),
-                              ),
+                  ? _EmptyMessage(
+                      icon: hasQuery
+                          ? Icons.search_off_rounded
+                          : Icons.bookmarks_outlined,
+                      text: hasQuery ? '没有找到相关内容' : '还没有保存任何文章',
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      itemCount: _results.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) => _ArticleTile(
+                        article: _results[index],
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => ArticleDetailPage(
+                              article: _results[index],
+                              store: widget.store,
+                              onChanged: widget.onChanged,
                             ),
                           ),
                         ),
+                      ),
+                    ),
             ),
           ],
         ),

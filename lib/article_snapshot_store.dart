@@ -30,58 +30,69 @@ class ArticleSnapshotStore {
     final articleDir = Directory(p.join(root.path, 'articles', id));
     final imageDir = Directory(p.join(articleDir.path, 'images'));
     final videoDir = Directory(p.join(articleDir.path, 'videos'));
-    await imageDir.create(recursive: true);
+    try {
+      await imageDir.create(recursive: true);
 
-    final localImageUrisByUrl = await _downloadImages(
-      snapshot: snapshot,
-      imageDir: imageDir,
-    );
-    final localVideoUri = await _downloadVideo(
-      snapshot: snapshot,
-      videoDir: videoDir,
-    );
-    final localPosterUri = await _downloadPoster(
-      snapshot: snapshot,
-      imageDir: imageDir,
-    );
-    final localAuthorAvatarUri = await _downloadAuthorAvatar(
-      snapshot: snapshot,
-      imageDir: imageDir,
-    );
-    final rewrittenHtml = buildXhsOfflineHtml(
-      title: snapshot.title,
-      content: snapshot.content,
-      localImageUris: snapshot.imageUrls
-          .map((url) => localImageUrisByUrl[url])
-          .whereType<String>()
-          .toList(growable: false),
-      localVideoUri: localVideoUri,
-      localPosterUri: localPosterUri,
-      authorName: snapshot.authorName,
-      authorAvatarUri: localAuthorAvatarUri,
-    );
-    final htmlFile = File(p.join(articleDir.path, 'index.html'));
-    await htmlFile.writeAsString(rewrittenHtml);
+      final localImageUrisByUrl = await _downloadImages(
+        snapshot: snapshot,
+        imageDir: imageDir,
+      );
+      final localVideoUri = await _downloadVideo(
+        snapshot: snapshot,
+        videoDir: videoDir,
+      );
+      final localPosterUri = await _downloadPoster(
+        snapshot: snapshot,
+        imageDir: imageDir,
+      );
+      final localAuthorAvatarUri = await _downloadAuthorAvatar(
+        snapshot: snapshot,
+        imageDir: imageDir,
+      );
+      final failedImageCount =
+          snapshot.imageUrls.length - localImageUrisByUrl.length;
+      final rewrittenHtml = buildXhsOfflineHtml(
+        title: snapshot.title,
+        content: snapshot.content,
+        localImageUris: snapshot.imageUrls
+            .map((url) => localImageUrisByUrl[url])
+            .whereType<String>()
+            .toList(growable: false),
+        localVideoUri: localVideoUri,
+        localPosterUri: localPosterUri,
+        failedImageCount: failedImageCount,
+        videoDownloadFailed: snapshot.videoUrl != null && localVideoUri == null,
+        authorName: snapshot.authorName,
+        authorAvatarUri: localAuthorAvatarUri,
+      );
+      final htmlFile = File(p.join(articleDir.path, 'index.html'));
+      await htmlFile.writeAsString(rewrittenHtml);
 
-    final localImages = imageDir.existsSync()
-        ? imageDir.listSync().whereType<File>().toList(growable: false)
-        : <File>[];
-    final article = SavedArticle(
-      id: id,
-      title: snapshot.title,
-      content: snapshot.content,
-      htmlPath: htmlFile.path,
-      coverPath:
-          _filePathFromFileUri(localPosterUri) ??
-          (localImages.isEmpty ? null : localImages.first.path),
-      sourceUrl: sourceUrl,
-      createdAt: DateTime.now(),
-    );
-    await _database.upsertArticle(article);
-    debugPrint(
-      'Saved snapshot title="${snapshot.title}" images=${localImageUrisByUrl.length} content=${snapshot.content.length} html=${htmlFile.path}',
-    );
-    return article;
+      final localImages = imageDir.existsSync()
+          ? imageDir.listSync().whereType<File>().toList(growable: false)
+          : <File>[];
+      final article = SavedArticle(
+        id: id,
+        title: snapshot.title,
+        content: snapshot.content,
+        htmlPath: htmlFile.path,
+        coverPath:
+            _filePathFromFileUri(localPosterUri) ??
+            (localImages.isEmpty ? null : localImages.first.path),
+        sourceUrl: sourceUrl,
+        createdAt: DateTime.now(),
+      );
+      await _database.upsertArticle(article);
+      debugPrint(
+        'Saved snapshot title="${snapshot.title}" images=${localImageUrisByUrl.length}/${snapshot.imageUrls.length} content=${snapshot.content.length} html=${htmlFile.path}',
+      );
+      return article;
+    } catch (_) {
+      if (articleDir.existsSync()) {
+        await articleDir.delete(recursive: true);
+      }
+      rethrow;
+    }
   }
 
   Future<List<SavedArticle>> listArticles() => _database.listArticles();

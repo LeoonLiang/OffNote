@@ -41,4 +41,17 @@ void main() {
     expect(html, contains('外骨骼徒步'));
     expect(html, contains('走进雪山'));
   });
+
+  test('shows an offline media warning when all media downloads fail', () {
+    final html = buildXhsOfflineHtml(
+      title: '离线失败的笔记',
+      content: '正文仍然应该可以阅读',
+      localImageUris: const [],
+      failedImageCount: 2,
+    );
+
+    expect(html, contains('媒体未完整保存'));
+    expect(html, contains('2 张图片保存失败'));
+    expect(html, isNot(contains('1</span> / 0')));
+  });
 }

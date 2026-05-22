@@ -10,6 +10,8 @@ class XhsNoteSnapshot {
     required this.title,
     required this.content,
     required this.imageUrls,
+    this.videoUrl,
+    this.posterUrl,
     this.authorName,
     this.authorAvatarUrl,
   });
@@ -17,6 +19,8 @@ class XhsNoteSnapshot {
   final String title;
   final String content;
   final List<String> imageUrls;
+  final String? videoUrl;
+  final String? posterUrl;
   final String? authorName;
   final String? authorAvatarUrl;
 }
@@ -44,7 +48,8 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
   }
 
   final title = _stringValue(note['title']) ?? _titleFromHtml(html);
-  final content = _contentStringValue(note['desc']) ?? _descriptionFromHtml(html);
+  final content =
+      _contentStringValue(note['desc']) ?? _descriptionFromHtml(html);
   final user = note['user'] is Map ? note['user'] as Map : null;
   final authorName =
       _stringValue(user?['nickName']) ??
@@ -55,8 +60,12 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
     sourceUrl,
   );
   final imageUrls = _extractImageUrlsFromNote(note, sourceUrl);
+  final videoUrl = _extractVideoUrlFromNote(note, sourceUrl);
+  final posterUrl = _extractPosterUrlFromHtml(html, sourceUrl);
 
-  if (title == null || content == null || imageUrls.isEmpty) {
+  if (title == null ||
+      content == null ||
+      (imageUrls.isEmpty && videoUrl == null)) {
     return null;
   }
 
@@ -64,6 +73,8 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
     title: title,
     content: content,
     imageUrls: imageUrls,
+    videoUrl: videoUrl,
+    posterUrl: posterUrl,
     authorName: authorName,
     authorAvatarUrl: authorAvatar.isEmpty ? null : authorAvatar,
   );
@@ -160,7 +171,7 @@ Map<String, dynamic>? _decodeInitialState(String html) {
 
 Map<dynamic, dynamic>? _findNoteMap(Object? value) {
   if (value is Map) {
-    if (value['imageList'] is List &&
+    if ((value['imageList'] is List || value['video'] is Map) &&
         value['user'] is Map &&
         value['desc'] is String) {
       return value;
@@ -217,6 +228,68 @@ List<String> _extractImageUrlsFromNote(
   return urls.toList(growable: false);
 }
 
+String? _extractVideoUrlFromNote(Map<dynamic, dynamic> note, String sourceUrl) {
+  final video = note['video'];
+  if (video is! Map) {
+    return null;
+  }
+  final media = video['media'];
+  if (media is! Map) {
+    return null;
+  }
+  final stream = media['stream'];
+  if (stream is! Map) {
+    return null;
+  }
+
+  for (final codec in ['h264', 'h265']) {
+    final streams = stream[codec];
+    if (streams is! List) {
+      continue;
+    }
+    final candidates = streams.whereType<Map>().toList(growable: false)
+      ..sort((a, b) => _intValue(b['size']).compareTo(_intValue(a['size'])));
+    for (final candidate in candidates) {
+      final rawUrl =
+          _stringValue(candidate['masterUrl']) ??
+          _firstBackupUrl(candidate['backupUrls']);
+      final normalized = normalizeResourceUrl(rawUrl ?? '', sourceUrl);
+      if (normalized.isNotEmpty) {
+        return normalized;
+      }
+    }
+  }
+
+  return null;
+}
+
+String? _firstBackupUrl(Object? backupUrls) {
+  if (backupUrls is! List) {
+    return null;
+  }
+  for (final value in backupUrls) {
+    final url = _stringValue(value);
+    if (url != null) {
+      return url;
+    }
+  }
+  return null;
+}
+
+String? _extractPosterUrlFromHtml(String html, String sourceUrl) {
+  final document = html_parser.parse(html);
+  final image =
+      document.querySelector('#video_note_poster') ??
+      document.querySelector('.video-container img') ??
+      document.querySelector('.video-stage img');
+  final rawUrl =
+      image?.attributes['src'] ??
+      image?.attributes['data-src'] ??
+      image?.attributes['data-original'];
+  final normalized = normalizeResourceUrl(rawUrl ?? '', sourceUrl);
+  return normalized.isEmpty ? null : normalized;
+}
+
 List<String?> _urlsFromInfoList(Object? infoList) {
   if (infoList is! List) {
     return const [];
@@ -234,6 +307,19 @@ String? _stringValue(Object? value) {
   }
   final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
   return normalized.isEmpty ? null : normalized;
+}
+
+int _intValue(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  if (value is String) {
+    return int.tryParse(value) ?? 0;
+  }
+  return 0;
 }
 
 // Like _stringValue but preserves newlines — used for note body text.

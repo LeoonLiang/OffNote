@@ -12,11 +12,18 @@ const snapshotReadyProbeScript = '''
   }
   var hasInitialState = !!(
     initialStateText &&
-    initialStateText.indexOf('"imageList"') !== -1 &&
+    (
+      initialStateText.indexOf('"imageList"') !== -1 ||
+      initialStateText.indexOf('"stream"') !== -1
+    ) &&
     initialStateText.indexOf('"desc"') !== -1
   );
   var hasRenderedNote = !!(
-    document.querySelector('.image-gallery-container img') &&
+    (
+      document.querySelector('.image-gallery-container img') ||
+      document.querySelector('.video-container img') ||
+      document.querySelector('#video_note_poster')
+    ) &&
     (
       document.querySelector('.note-content') ||
       document.querySelector('[class*="note-content"]') ||

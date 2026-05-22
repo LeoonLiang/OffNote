@@ -51,5 +51,7 @@ ios/Pods/
 ios/Podfile.lock
 
 # Local research/export samples
+.firecrawl/
+downloads/
 xhs.docx
 *.docx

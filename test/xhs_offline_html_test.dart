@@ -23,4 +23,22 @@ void main() {
     expect(html, isNot(contains('相关推荐')));
     expect(html, isNot(contains('打开 App')));
   });
+
+  test('builds a static xhs-style page with local video player', () {
+    final html = buildXhsOfflineHtml(
+      title: '外骨骼徒步',
+      content: '走进雪山\n#外骨骼[话题]#',
+      authorName: '阿呸Ah bah',
+      authorAvatarUri: 'file:///tmp/article/images/author_avatar.jpg',
+      localImageUris: const [],
+      localVideoUri: 'file:///tmp/article/videos/video_0.mp4',
+      localPosterUri: 'file:///tmp/article/images/poster.jpg',
+    );
+
+    expect(html, contains('<video class="video-player" controls'));
+    expect(html, contains('src="file:///tmp/article/videos/video_0.mp4"'));
+    expect(html, contains('poster="file:///tmp/article/images/poster.jpg"'));
+    expect(html, contains('外骨骼徒步'));
+    expect(html, contains('走进雪山'));
+  });
 }

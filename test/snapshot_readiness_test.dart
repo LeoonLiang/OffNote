@@ -12,6 +12,8 @@ void main() {
   test('probe waits for xhs initial state or rendered note content', () {
     expect(snapshotReadyProbeScript, contains('window.__INITIAL_STATE__'));
     expect(snapshotReadyProbeScript, contains('.image-gallery-container'));
+    expect(snapshotReadyProbeScript, contains('.video-container'));
+    expect(snapshotReadyProbeScript, contains('"stream"'));
     expect(snapshotReadyProbeScript, contains('.note-content'));
   });
 }

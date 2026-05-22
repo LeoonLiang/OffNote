@@ -10,6 +10,8 @@ class ArticleSnapshot {
     required this.sourceUrl,
     required this.html,
     required this.imageUrls,
+    this.videoUrl,
+    this.posterUrl,
     this.authorName,
     this.authorAvatarUrl,
   });
@@ -19,6 +21,8 @@ class ArticleSnapshot {
   final String sourceUrl;
   final String html;
   final List<String> imageUrls;
+  final String? videoUrl;
+  final String? posterUrl;
   final String? authorName;
   final String? authorAvatarUrl;
 }
@@ -35,6 +39,8 @@ ArticleSnapshot parseArticleSnapshot({
       sourceUrl: sourceUrl,
       html: html,
       imageUrls: xhsSnapshot.imageUrls,
+      videoUrl: xhsSnapshot.videoUrl,
+      posterUrl: xhsSnapshot.posterUrl,
       authorName: xhsSnapshot.authorName,
       authorAvatarUrl: xhsSnapshot.authorAvatarUrl,
     );

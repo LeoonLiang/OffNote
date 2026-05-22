@@ -2,9 +2,12 @@ String buildXhsOfflineHtml({
   required String title,
   required String content,
   required List<String> localImageUris,
+  String? localVideoUri,
+  String? localPosterUri,
   String? authorName,
   String? authorAvatarUri,
 }) {
+  final hasVideo = localVideoUri != null && localVideoUri.isNotEmpty;
   final slides = localImageUris.indexed
       .map(
         (entry) =>
@@ -20,6 +23,19 @@ String buildXhsOfflineHtml({
   final avatar = authorAvatarUri == null
       ? '<div class="avatar avatar-placeholder"></div>'
       : '<img class="avatar" src="${_escapeAttribute(authorAvatarUri)}" alt="">';
+  final gallery = hasVideo
+      ? '''
+    <section class="gallery">
+      <video class="video-player" controls playsinline preload="metadata"${localPosterUri == null ? '' : ' poster="${_escapeAttribute(localPosterUri)}"'}>
+        <source src="${_escapeAttribute(localVideoUri)}" type="video/mp4">
+      </video>
+    </section>'''
+      : '''
+    <section class="gallery">
+      <div class="counter"><span id="current-slide">1</span> / ${localImageUris.length}</div>
+      <section id="carousel" class="carousel" aria-label="图片轮播">$slides</section>
+      <div id="dots" class="dots">$indicatorDots</div>
+    </section>''';
 
   return '''
 <!doctype html>
@@ -47,6 +63,7 @@ String buildXhsOfflineHtml({
     .carousel::-webkit-scrollbar { display: none; }
     .slide { flex: 0 0 100%; margin: 0; min-height: 320px; max-height: 72vh; scroll-snap-align: center; display: flex; align-items: center; justify-content: center; background: #111; }
     .slide img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .video-player { width: 100%; max-height: 72vh; min-height: 320px; display: block; background: #111; object-fit: contain; }
     .counter { position: absolute; right: 12px; top: 12px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.48); color: #fff; font-size: 12px; font-weight: 700; }
     .dots { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 2; display: flex; justify-content: center; gap: 5px; pointer-events: none; }
     .dot { width: 5px; height: 5px; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.52); }
@@ -63,11 +80,7 @@ String buildXhsOfflineHtml({
 </head>
 <body>
   <main class="page">
-    <section class="gallery">
-      <div class="counter"><span id="current-slide">1</span> / ${localImageUris.length}</div>
-      <section id="carousel" class="carousel" aria-label="图片轮播">$slides</section>
-      <div id="dots" class="dots">$indicatorDots</div>
-    </section>
+$gallery
     <section class="meta">
       $avatar
       <div class="author">${_escapeHtml(authorName ?? '小红书用户')}</div>

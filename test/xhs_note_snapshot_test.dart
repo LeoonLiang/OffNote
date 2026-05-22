@@ -109,10 +109,12 @@ void main() {
     expect(snapshot!.content, '第一段内容\n第二段内容\n\n第三段内容');
   });
 
-  test('uses INITIAL_STATE desc (with newlines) even when carousel images are rendered', () {
-    // Real-world case: page has rendered carousel but INITIAL_STATE JSON
-    // (which contains undefined values) is the only source of content with newlines.
-    const html = r'''
+  test(
+    'uses INITIAL_STATE desc (with newlines) even when carousel images are rendered',
+    () {
+      // Real-world case: page has rendered carousel but INITIAL_STATE JSON
+      // (which contains undefined values) is the only source of content with newlines.
+      const html = r'''
     <html>
       <head>
         <meta name="description" content="第一行 第二行 第三行">
@@ -136,13 +138,57 @@ void main() {
     </html>
     ''';
 
+      final snapshot = parseXhsNoteSnapshot(
+        html: html,
+        sourceUrl: 'https://www.xiaohongshu.com/discovery/item/demo',
+      );
+
+      expect(snapshot, isNotNull);
+      // Must use JSON desc, not the meta description (which has spaces instead of newlines)
+      expect(snapshot!.content, '第一行\n第二行\n第三行');
+    },
+  );
+
+  test('extracts video stream and poster from video note initial state', () {
+    const html = r'''
+    <html>
+      <head><title>视频兜底标题 - 小红书</title></head>
+      <body>
+        <img id="video_note_poster" src="http://sns-webpic-qc.xhscdn.com/poster.jpg">
+        <script>
+          window.__INITIAL_STATE__={
+            "note":{"noteDetailMap":{"abc":{"note":{
+              "title":"外骨骼徒步",
+              "desc":"走进雪山\n#外骨骼[话题]#",
+              "user":{"nickname":"阿呸Ah bah","image":"https:\/\/sns-avatar-qc.xhscdn.com\/avatar\/demo.jpg"},
+              "video":{"media":{"stream":{
+                "h265":[{"masterUrl":"http:\/\/sns-video-v6.xhscdn.com\/stream\/h265.mp4","size":7844646,"format":"mp4"}],
+                "h264":[
+                  {"masterUrl":"http:\/\/sns-video-v6.xhscdn.com\/stream\/small.mp4","size":100,"format":"mp4"},
+                  {"masterUrl":"http:\/\/sns-video-v6.xhscdn.com\/stream\/large.mp4?sign=abc","size":10908912,"format":"mp4"}
+                ]
+              }}}
+            }}}}
+          }
+        </script>
+      </body>
+    </html>
+    ''';
+
     final snapshot = parseXhsNoteSnapshot(
       html: html,
       sourceUrl: 'https://www.xiaohongshu.com/discovery/item/demo',
     );
 
     expect(snapshot, isNotNull);
-    // Must use JSON desc, not the meta description (which has spaces instead of newlines)
-    expect(snapshot!.content, '第一行\n第二行\n第三行');
+    expect(snapshot!.title, '外骨骼徒步');
+    expect(snapshot.content, '走进雪山\n#外骨骼[话题]#');
+    expect(snapshot.authorName, '阿呸Ah bah');
+    expect(snapshot.imageUrls, isEmpty);
+    expect(
+      snapshot.videoUrl,
+      'https://sns-video-v6.xhscdn.com/stream/large.mp4?sign=abc',
+    );
+    expect(snapshot.posterUrl, 'https://sns-webpic-qc.xhscdn.com/poster.jpg');
   });
 }

@@ -29,9 +29,18 @@ class ArticleSnapshotStore {
     final root = await getApplicationDocumentsDirectory();
     final articleDir = Directory(p.join(root.path, 'articles', id));
     final imageDir = Directory(p.join(articleDir.path, 'images'));
+    final videoDir = Directory(p.join(articleDir.path, 'videos'));
     await imageDir.create(recursive: true);
 
     final localImageUrisByUrl = await _downloadImages(
+      snapshot: snapshot,
+      imageDir: imageDir,
+    );
+    final localVideoUri = await _downloadVideo(
+      snapshot: snapshot,
+      videoDir: videoDir,
+    );
+    final localPosterUri = await _downloadPoster(
       snapshot: snapshot,
       imageDir: imageDir,
     );
@@ -46,6 +55,8 @@ class ArticleSnapshotStore {
           .map((url) => localImageUrisByUrl[url])
           .whereType<String>()
           .toList(growable: false),
+      localVideoUri: localVideoUri,
+      localPosterUri: localPosterUri,
       authorName: snapshot.authorName,
       authorAvatarUri: localAuthorAvatarUri,
     );
@@ -60,7 +71,9 @@ class ArticleSnapshotStore {
       title: snapshot.title,
       content: snapshot.content,
       htmlPath: htmlFile.path,
-      coverPath: localImages.isEmpty ? null : localImages.first.path,
+      coverPath:
+          _filePathFromFileUri(localPosterUri) ??
+          (localImages.isEmpty ? null : localImages.first.path),
       sourceUrl: sourceUrl,
       createdAt: DateTime.now(),
     );
@@ -127,10 +140,7 @@ class ArticleSnapshotStore {
           options: Options(
             followRedirects: true,
             receiveTimeout: const Duration(seconds: 20),
-            headers: const {
-              'User-Agent':
-                  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
-            },
+            headers: _downloadHeaders(snapshot.sourceUrl),
           ),
         );
         localImageUrisByUrl[imageUrl] = file.uri.toString();
@@ -161,10 +171,68 @@ class ArticleSnapshotStore {
         options: Options(
           followRedirects: true,
           receiveTimeout: const Duration(seconds: 20),
-          headers: const {
-            'User-Agent':
-                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
-          },
+          headers: _downloadHeaders(snapshot.sourceUrl),
+        ),
+      );
+      return file.uri.toString();
+    } catch (_) {
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+      return null;
+    }
+  }
+
+  Future<String?> _downloadPoster({
+    required ArticleSnapshot snapshot,
+    required Directory imageDir,
+  }) async {
+    final posterUrl = snapshot.posterUrl;
+    if (posterUrl == null) {
+      return null;
+    }
+
+    final file = File(p.join(imageDir.path, 'poster.jpg'));
+    try {
+      await _dio.download(
+        posterUrl,
+        file.path,
+        options: Options(
+          followRedirects: true,
+          receiveTimeout: const Duration(seconds: 20),
+          headers: _downloadHeaders(snapshot.sourceUrl),
+        ),
+      );
+      return file.uri.toString();
+    } catch (_) {
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+      return null;
+    }
+  }
+
+  Future<String?> _downloadVideo({
+    required ArticleSnapshot snapshot,
+    required Directory videoDir,
+  }) async {
+    final videoUrl = snapshot.videoUrl;
+    if (videoUrl == null) {
+      return null;
+    }
+
+    await videoDir.create(recursive: true);
+    final file = File(
+      p.join(videoDir.path, 'video_0${_extensionForVideoUrl(videoUrl)}'),
+    );
+    try {
+      await _dio.download(
+        videoUrl,
+        file.path,
+        options: Options(
+          followRedirects: true,
+          receiveTimeout: const Duration(minutes: 2),
+          headers: _downloadHeaders(snapshot.sourceUrl),
         ),
       );
       return file.uri.toString();
@@ -184,5 +252,34 @@ class ArticleSnapshotStore {
       }
     }
     return '.jpg';
+  }
+
+  String _extensionForVideoUrl(String videoUrl) {
+    final path = Uri.parse(videoUrl).path.toLowerCase();
+    for (final extension in ['.mp4', '.mov', '.m4v']) {
+      if (path.endsWith(extension)) {
+        return extension;
+      }
+    }
+    return '.mp4';
+  }
+
+  Map<String, String> _downloadHeaders(String sourceUrl) {
+    return {
+      'User-Agent':
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+      'Referer': sourceUrl,
+    };
+  }
+
+  String? _filePathFromFileUri(String? uri) {
+    if (uri == null) {
+      return null;
+    }
+    final parsed = Uri.tryParse(uri);
+    if (parsed == null || parsed.scheme != 'file') {
+      return null;
+    }
+    return parsed.toFilePath();
   }
 }

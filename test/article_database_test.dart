@@ -21,7 +21,7 @@ void main() {
     required String title,
     required String content,
     ArticleMediaType mediaType = ArticleMediaType.image,
-    int createdAt = 1000,
+    int publishedAt = 1000,
   }) {
     return SavedArticle(
       id: id,
@@ -30,7 +30,7 @@ void main() {
       htmlPath: '/tmp/$id/index.html',
       coverPath: null,
       sourceUrl: 'https://example.com/$id',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(createdAt),
+      publishedAt: DateTime.fromMillisecondsSinceEpoch(publishedAt),
       mediaType: mediaType,
     );
   }
@@ -248,6 +248,69 @@ void main() {
       };
       expect(mediaTypesById['image'], ArticleMediaType.image);
       expect(mediaTypesById['video'], ArticleMediaType.video);
+    },
+  );
+
+  test(
+    'migrates a v4 database to v5 with published_at and image_paths',
+    () async {
+      final path = await databaseFactory.getDatabasesPath();
+      final dbPath = '$path/offnote-v4-to-v5-migration-test.db';
+      await databaseFactory.deleteDatabase(dbPath);
+
+      final legacyDb = await databaseFactory.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 4,
+          onCreate: (db, version) async {
+            await db.execute('''
+            CREATE TABLE articles (
+              id TEXT PRIMARY KEY,
+              title TEXT,
+              content TEXT,
+              html_path TEXT,
+              cover_path TEXT,
+              source_url TEXT,
+              created_at INTEGER,
+              media_type TEXT NOT NULL DEFAULT 'image',
+              category_id TEXT
+            )
+          ''');
+            await db.execute('''
+            CREATE TABLE categories (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              color INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+            await db.insert('articles', {
+              'id': 'old-article',
+              'title': 'V4旧文章',
+              'content': '迁移测试内容',
+              'html_path': '/tmp/old/index.html',
+              'cover_path': null,
+              'source_url': 'https://example.com/old',
+              'created_at': 1640000000000,
+              'media_type': 'image',
+              'category_id': null,
+            });
+          },
+        ),
+      );
+      await legacyDb.close();
+
+      final migratedDb = await openTestDatabase(dbPath);
+
+      // After migration, we should be able to get articles
+      final articles = await migratedDb.listArticles();
+      expect(articles.length, 1);
+
+      // The article should have been migrated with the correct timestamp
+      final article = articles.first;
+      expect(article.id, 'old-article');
+      // This tests that created_at was migrated to publishedAt
+      expect(article.publishedAt.millisecondsSinceEpoch, 1640000000000);
     },
   );
 }

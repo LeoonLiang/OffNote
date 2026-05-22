@@ -80,7 +80,7 @@ class ArticleSnapshotStore {
             _filePathFromFileUri(localPosterUri) ??
             (localImages.isEmpty ? null : localImages.first.path),
         sourceUrl: sourceUrl,
-        createdAt: DateTime.now(),
+        publishedAt: DateTime.now(),
         mediaType: snapshot.videoUrl == null
             ? ArticleMediaType.image
             : ArticleMediaType.video,

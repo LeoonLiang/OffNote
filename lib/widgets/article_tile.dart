@@ -84,7 +84,7 @@ class _ArticleTile extends StatelessWidget {
                         _MediaTypeBadge(mediaType: article.mediaType),
                         const SizedBox(width: 8),
                         Text(
-                          _dateLabel(article.createdAt),
+                          _dateLabel(article.publishedAt),
                           style: const TextStyle(color: _muted, fontSize: 12),
                         ),
                       ],

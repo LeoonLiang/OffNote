@@ -22,7 +22,7 @@ class SavedArticle {
     required this.htmlPath,
     required this.coverPath,
     required this.sourceUrl,
-    required this.createdAt,
+    required this.publishedAt,
     this.mediaType = ArticleMediaType.image,
     this.categoryId,
   });
@@ -33,7 +33,7 @@ class SavedArticle {
   final String htmlPath;
   final String? coverPath;
   final String sourceUrl;
-  final DateTime createdAt;
+  final DateTime publishedAt;
   final ArticleMediaType mediaType;
   final String? categoryId;
 
@@ -45,7 +45,7 @@ class SavedArticle {
       'html_path': htmlPath,
       'cover_path': coverPath,
       'source_url': sourceUrl,
-      'created_at': createdAt.millisecondsSinceEpoch,
+      'published_at': publishedAt.millisecondsSinceEpoch,
       'media_type': mediaType.value,
       'category_id': categoryId,
     };
@@ -59,7 +59,7 @@ class SavedArticle {
       htmlPath: map['html_path'] as String,
       coverPath: map['cover_path'] as String?,
       sourceUrl: map['source_url'] as String? ?? '',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
+      publishedAt: DateTime.fromMillisecondsSinceEpoch(map['published_at'] as int),
       mediaType: ArticleMediaType.fromValue(map['media_type']),
       categoryId: map['category_id'] as String?,
     );
@@ -73,7 +73,7 @@ class SavedArticle {
       htmlPath: htmlPath,
       coverPath: coverPath,
       sourceUrl: sourceUrl,
-      createdAt: createdAt,
+      publishedAt: publishedAt,
       mediaType: mediaType,
       categoryId: categoryId,
     );

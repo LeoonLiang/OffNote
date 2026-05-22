@@ -32,7 +32,7 @@ class ArticleDatabase {
     final database = await (_databaseFactory ?? databaseFactory).openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onCreate: (db, version) async {
           await _createSchema(db);
           await _tryCreateArticleFtsSchema(db);
@@ -67,6 +67,9 @@ class ArticleDatabase {
             await _addMediaTypeColumn(db);
             await _backfillArticleMediaTypes(db);
           }
+          if (oldVersion < 5) {
+            await _migrateToPublishedAt(db);
+          }
         },
       ),
     );
@@ -89,13 +92,14 @@ class ArticleDatabase {
         html_path TEXT,
         cover_path TEXT,
         source_url TEXT,
-        created_at INTEGER,
+        published_at INTEGER,
         media_type TEXT NOT NULL DEFAULT 'image',
-        category_id TEXT
+        category_id TEXT,
+        image_paths TEXT
       )
     ''');
     await db.execute(
-      'CREATE INDEX articles_created_at_idx ON articles(created_at)',
+      'CREATE INDEX articles_published_at_idx ON articles(published_at)',
     );
     await db.execute('CREATE INDEX articles_title_idx ON articles(title)');
     await db.execute(
@@ -187,6 +191,56 @@ class ArticleDatabase {
     }
   }
 
+  Future<void> _migrateToPublishedAt(DatabaseExecutor db) async {
+    // Add new columns
+    await db.execute('ALTER TABLE articles ADD COLUMN published_at INTEGER');
+    await db.execute('ALTER TABLE articles ADD COLUMN image_paths TEXT');
+
+    // Copy created_at to published_at
+    await db.execute('UPDATE articles SET published_at = created_at');
+
+    // Create temporary table with new schema
+    await db.execute('''
+      CREATE TABLE articles_new (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        content TEXT,
+        html_path TEXT,
+        cover_path TEXT,
+        source_url TEXT,
+        published_at INTEGER,
+        media_type TEXT NOT NULL DEFAULT 'image',
+        category_id TEXT,
+        image_paths TEXT
+      )
+    ''');
+
+    // Copy data to new table
+    await db.execute('''
+      INSERT INTO articles_new (
+        id, title, content, html_path, cover_path, source_url,
+        published_at, media_type, category_id, image_paths
+      )
+      SELECT
+        id, title, content, html_path, cover_path, source_url,
+        published_at, media_type, category_id, image_paths
+      FROM articles
+    ''');
+
+    // Drop old table and rename new table
+    await db.execute('DROP TABLE articles');
+    await db.execute('ALTER TABLE articles_new RENAME TO articles');
+
+    // Recreate indexes
+    await db.execute(
+      'CREATE INDEX articles_published_at_idx ON articles(published_at)',
+    );
+    await db.execute('CREATE INDEX articles_title_idx ON articles(title)');
+    await db.execute(
+      'CREATE INDEX articles_category_id_idx ON articles(category_id)',
+    );
+  }
+
   ArticleMediaType _inferMediaTypeFromHtmlPath(String htmlPath) {
     try {
       final file = File(htmlPath);
@@ -229,7 +283,7 @@ class ArticleDatabase {
 
   Future<List<SavedArticle>> listArticles() async {
     final db = await _db;
-    final rows = await db.query('articles', orderBy: 'created_at DESC');
+    final rows = await db.query('articles', orderBy: 'published_at DESC');
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
 
@@ -239,7 +293,7 @@ class ArticleDatabase {
       'articles',
       where: 'category_id = ?',
       whereArgs: [categoryId],
-      orderBy: 'created_at DESC',
+      orderBy: 'published_at DESC',
     );
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
@@ -263,7 +317,7 @@ class ArticleDatabase {
         FROM articles
         JOIN articles_fts ON articles_fts.id = articles.id
         WHERE articles_fts MATCH ?
-        ORDER BY articles.created_at DESC
+        ORDER BY articles.published_at DESC
         ''',
         [_ftsQuery(normalized)],
       );
@@ -284,7 +338,7 @@ class ArticleDatabase {
       'articles',
       where: 'title LIKE ? OR content LIKE ?',
       whereArgs: ['%$query%', '%$query%'],
-      orderBy: 'created_at DESC',
+      orderBy: 'published_at DESC',
     );
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }

@@ -1,9 +1,9 @@
 part of 'main.dart';
 
 class SaveArticleDialog extends StatefulWidget {
-  const SaveArticleDialog({super.key, required this.store, this.initialText});
+  const SaveArticleDialog({super.key, required this.queue, this.initialText});
 
-  final ArticleSnapshotStore store;
+  final SaveQueueController queue;
   final String? initialText;
 
   @override
@@ -12,14 +12,6 @@ class SaveArticleDialog extends StatefulWidget {
 
 class _SaveArticleDialogState extends State<SaveArticleDialog> {
   final _textController = TextEditingController();
-  final _steps = <_SaveStep>[
-    _SaveStep('识别链接'),
-    _SaveStep('加载网页'),
-    _SaveStep('提取正文'),
-    _SaveStep('下载图片'),
-    _SaveStep('保存到本地'),
-  ];
-  Completer<void>? _pageLoaded;
   String? _message;
   bool _saving = false;
 
@@ -38,19 +30,9 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     super.dispose();
   }
 
-  void _setStep(int index, _StepState state) {
-    if (!mounted) {
-      return;
-    }
-    setState(() => _steps[index].state = state);
-  }
-
   Future<void> _save() async {
     if (_saving) {
       return;
-    }
-    for (final step in _steps) {
-      step.state = _StepState.waiting;
     }
     setState(() {
       _saving = true;
@@ -58,44 +40,15 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     });
 
     try {
-      _setStep(0, _StepState.running);
       final url = extractFirstUrl(_textController.text);
       if (url == null) {
         throw Exception('没有识别到链接');
       }
-      _setStep(0, _StepState.done);
-
-      _setStep(1, _StepState.running);
-      final controller = await _createController();
-      _pageLoaded = Completer<void>();
-      await controller.loadRequest(Uri.parse(url));
-      await _pageLoaded!.future.timeout(const Duration(seconds: 35));
-      setState(() => _message = '网页已打开，正在等待正文和图片渲染完整...');
-      await _waitForSnapshotReady(controller);
-      final sourceUrl = await controller.currentUrl() ?? url;
-      _setStep(1, _StepState.done);
-      setState(() => _message = '网页内容已就绪，正在生成离线快照...');
-
-      _setStep(2, _StepState.running);
-      final htmlResult = await controller.runJavaScriptReturningResult(
-        'document.documentElement.outerHTML',
-      );
-      final html = decodeJavaScriptStringResult(htmlResult);
-      _setStep(2, _StepState.done);
-
-      _setStep(3, _StepState.running);
-      _setStep(4, _StepState.running);
-      final article = await widget.store.save(
-        rawHtml: html,
-        sourceUrl: sourceUrl,
-      );
-      _setStep(3, _StepState.done);
-      _setStep(4, _StepState.done);
-
+      widget.queue.enqueue(url);
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pop(article);
+      Navigator.of(context).pop(true);
     } catch (error) {
       if (!mounted) {
         return;
@@ -107,61 +60,11 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     }
   }
 
-  Future<void> _waitForSnapshotReady(WebViewController controller) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 18));
-    Object? lastResult;
-    while (DateTime.now().isBefore(deadline)) {
-      lastResult = await controller.runJavaScriptReturningResult(
-        snapshotReadyProbeScript,
-      );
-      if (decodeSnapshotReadinessResult(lastResult)) {
-        await Future<void>.delayed(const Duration(milliseconds: 900));
-        return;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    }
-    throw TimeoutException('网页内容还没加载完成，请稍后重试');
-  }
-
-  Future<WebViewController> _createController() async {
-    final controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (_) {},
-          onPageFinished: (_) {
-            if (_pageLoaded?.isCompleted == false) {
-              _pageLoaded?.complete();
-            }
-          },
-          onNavigationRequest: (request) {
-            final uri = Uri.parse(request.url);
-            return shouldLoadInWebView(uri)
-                ? NavigationDecision.navigate
-                : NavigationDecision.prevent;
-          },
-          onWebResourceError: (error) {
-            if (_pageLoaded?.isCompleted == false &&
-                error.isForMainFrame == true) {
-              _pageLoaded?.completeError(error.description);
-            }
-          },
-        ),
-      );
-    final platformController = controller.platform;
-    if (platformController is AndroidWebViewController) {
-      await platformController.setMixedContentMode(
-        MixedContentMode.alwaysAllow,
-      );
-    }
-    return controller;
-  }
-
   @override
   Widget build(BuildContext context) {
     return ShadDialog(
-      title: const Text('保存网页'),
-      description: const Text('网页将被转为离线快照永久保存到本地。'),
+      title: const Text('加入收录队列'),
+      description: const Text('链接会在后台解析并保存，完成后会通知你。'),
       closeIcon: ShadIconButton.ghost(
         enabled: !_saving,
         icon: const Icon(LucideIcons.x),
@@ -191,14 +94,14 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
             ),
             const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
                 color: _paper,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Column(
                 children: [
-                  ..._steps.map((step) => _ProgressRow(step: step)),
+                  const _QueueHintRow(),
                   if (_message != null) ...[
                     const Divider(
                       height: 18,
@@ -208,26 +111,20 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 1),
+                        const Padding(
+                          padding: EdgeInsets.only(top: 1),
                           child: Icon(
-                            _message!.startsWith('保存失败')
-                                ? LucideIcons.circleAlert
-                                : LucideIcons.info,
+                            LucideIcons.circleAlert,
                             size: 13,
-                            color: _message!.startsWith('保存失败')
-                                ? Colors.redAccent
-                                : _muted,
+                            color: Colors.redAccent,
                           ),
                         ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             _message!,
-                            style: TextStyle(
-                              color: _message!.startsWith('保存失败')
-                                  ? Colors.redAccent
-                                  : _muted,
+                            style: const TextStyle(
+                              color: Colors.redAccent,
                               fontSize: 12,
                               height: 1.45,
                             ),
@@ -268,8 +165,8 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
                               color: Colors.white,
                             ),
                           )
-                        : const Icon(LucideIcons.bookMarked, size: 16),
-                    child: Text(_saving ? '保存中...' : '解析并保存'),
+                        : const Icon(LucideIcons.listPlus, size: 16),
+                    child: Text(_saving ? '入队中...' : '加入队列'),
                   ),
                 ),
               ],
@@ -281,57 +178,22 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
   }
 }
 
-class _ProgressRow extends StatelessWidget {
-  const _ProgressRow({required this.step});
-
-  final _SaveStep step;
+class _QueueHintRow extends StatelessWidget {
+  const _QueueHintRow();
 
   @override
   Widget build(BuildContext context) {
-    final isDone = step.state == _StepState.done;
-    final isRunning = step.state == _StepState.running;
-    final isWaiting = step.state == _StepState.waiting;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: isRunning ? _accentSoft : Colors.transparent,
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Row(
-        children: [
-          SizedBox.square(
-            dimension: 18,
-            child: isRunning
-                ? CircularProgressIndicator(strokeWidth: 2, color: _accent)
-                : Icon(
-                    isDone ? Icons.check_circle_rounded : Icons.circle_outlined,
-                    size: 18,
-                    color: isDone ? _accent : const Color(0xffc8cbc1),
-                  ),
+    return const Row(
+      children: [
+        Icon(LucideIcons.listChecks, size: 16, color: _accent),
+        SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '大图和视频会排队下载，不用停在这个窗口等待。',
+            style: TextStyle(color: _muted, fontSize: 12, height: 1.4),
           ),
-          const SizedBox(width: 10),
-          Text(
-            step.label,
-            style: TextStyle(
-              fontSize: 13.5,
-              color: isWaiting ? const Color(0xffb0b5ae) : _ink,
-              fontWeight: isRunning ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
-
-class _SaveStep {
-  _SaveStep(this.label);
-
-  final String label;
-  _StepState state = _StepState.waiting;
-}
-
-enum _StepState { waiting, running, done }

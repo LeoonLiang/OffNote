@@ -6,17 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import 'article_snapshot_store.dart';
+import 'article_capture_service.dart';
 import 'article_storage_stats.dart';
-import 'js_result_decoder.dart';
 import 'link_parser.dart';
+import 'save_queue.dart';
 import 'save_failure_message.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
-import 'snapshot_readiness.dart';
-import 'web_navigation_policy.dart';
 
 part 'theme.dart';
 part 'pages/home_page.dart';
@@ -25,6 +23,7 @@ part 'pages/article_list_page.dart';
 part 'pages/category_page.dart';
 part 'pages/article_detail_page.dart';
 part 'pages/storage_stats_page.dart';
+part 'pages/save_queue_page.dart';
 part 'widgets/article_tile.dart';
 part 'widgets/category_tile.dart';
 part 'widgets/nav_item.dart';
@@ -41,7 +40,7 @@ class OffNoteApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ShadApp(
-      title: 'OffNote',
+      title: '离线笔记',
       debugShowCheckedModeBanner: false,
       theme: ShadThemeData(
         brightness: Brightness.light,

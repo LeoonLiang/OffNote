@@ -9,6 +9,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _store = ArticleSnapshotStore();
+  late final SaveQueueController _saveQueue = SaveQueueController(
+    worker: ArticleCaptureService(store: _store).saveUrl,
+  );
+  final _notifiedTaskIds = <String>{};
   int _index = 0;
   int _refreshTick = 0;
   String? _lastClipboard;
@@ -19,6 +23,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _saveQueue.addListener(_onQueueChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkClipboard());
     _shareSubscription = ReceiveSharingIntent.instance.getMediaStream().listen(
       _handleSharedMedia,
@@ -32,7 +37,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _saveQueue.removeListener(_onQueueChanged);
     _shareSubscription?.cancel();
+    _saveQueue.dispose();
     super.dispose();
   }
 
@@ -42,6 +49,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _refresh() => setState(() => _refreshTick++);
+
+  void _onQueueChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
+    for (final task in _saveQueue.tasks) {
+      if (_notifiedTaskIds.contains(task.id)) {
+        continue;
+      }
+      if (task.status == SaveQueueTaskStatus.success && task.article != null) {
+        _notifiedTaskIds.add(task.id);
+        _refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已收录：${task.article!.title}'),
+            action: SnackBarAction(
+              label: '打开',
+              onPressed: () => _openArticle(task.article!),
+            ),
+          ),
+        );
+      } else if (task.status == SaveQueueTaskStatus.failed) {
+        _notifiedTaskIds.add(task.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('收录失败：${task.errorMessage ?? task.url}')),
+        );
+      }
+    }
+  }
 
   bool _isXhsUrl(String url) {
     final host = Uri.tryParse(url)?.host ?? '';
@@ -124,16 +161,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openSaveDialog({String? initialText}) async {
-    final article = await showShadDialog<SavedArticle>(
+    final queued = await showShadDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) =>
-          SaveArticleDialog(store: _store, initialText: initialText),
+          SaveArticleDialog(queue: _saveQueue, initialText: initialText),
     );
-    if (article == null || !mounted) {
+    if (queued != true || !mounted) {
       return;
     }
-    _refresh();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已加入收录队列')));
+  }
+
+  Future<void> _openArticle(SavedArticle article) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ArticleDetailPage(
@@ -156,6 +198,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         onChanged: _refresh,
         searchable: true,
         actions: [
+          IconButton(
+            onPressed: _openSaveQueue,
+            tooltip: '收录队列',
+            icon: Badge(
+              isLabelVisible: _saveQueue.activeCount > 0,
+              label: Text('${_saveQueue.activeCount}'),
+              child: const Icon(Icons.playlist_add_check_rounded),
+            ),
+          ),
           IconButton(
             onPressed: _openStorageStats,
             tooltip: '使用统计',
@@ -213,6 +264,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _openStorageStats() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => StorageStatsPage(store: _store)),
+    );
+  }
+
+  Future<void> _openSaveQueue() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => SaveQueuePage(queue: _saveQueue)),
     );
   }
 }

@@ -38,6 +38,14 @@ void main() {
     );
   }
 
+  Future<ArticleDatabase> openTestDatabaseWithoutFts(String path) async {
+    return ArticleDatabase(
+      databaseFactory: databaseFactory,
+      databasePath: path,
+      enableFullTextSearch: false,
+    );
+  }
+
   test('creates the FTS table for a new database', () async {
     final db = await openTestDatabase(inMemoryDatabasePath);
 
@@ -78,6 +86,18 @@ void main() {
     );
 
     expect((await db.searchArticles('a-b')).single.id, 'a1');
+  });
+
+  test('saves and searches with LIKE when FTS is unavailable', () async {
+    final db = await openTestDatabaseWithoutFts(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(id: 'a1', title: '离线保存', content: '没有 FTS 也不能影响保存'),
+    );
+
+    expect((await db.searchArticles('FTS')).single.id, 'a1');
+    await db.deleteArticle('a1');
+    expect(await db.searchArticles('FTS'), isEmpty);
   });
 
   test(

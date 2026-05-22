@@ -6,13 +6,19 @@ import 'saved_article.dart';
 import 'saved_category.dart';
 
 class ArticleDatabase {
-  ArticleDatabase({DatabaseFactory? databaseFactory, String? databasePath})
-    : _databaseFactory = databaseFactory,
-      _databasePath = databasePath;
+  ArticleDatabase({
+    DatabaseFactory? databaseFactory,
+    String? databasePath,
+    bool enableFullTextSearch = true,
+  }) : _databaseFactory = databaseFactory,
+       _databasePath = databasePath,
+       _enableFullTextSearch = enableFullTextSearch;
 
   final DatabaseFactory? _databaseFactory;
   final String? _databasePath;
+  final bool _enableFullTextSearch;
   Database? _database;
+  bool _articleFtsAvailable = false;
 
   Future<Database> get _db async {
     final existing = _database;
@@ -27,6 +33,7 @@ class ArticleDatabase {
         version: 3,
         onCreate: (db, version) async {
           await _createSchema(db);
+          await _tryCreateArticleFtsSchema(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) {
@@ -49,12 +56,15 @@ class ArticleDatabase {
             );
           }
           if (oldVersion < 3) {
-            await _createArticleFtsSchema(db);
-            await _rebuildArticleFts(db);
+            final ftsCreated = await _tryCreateArticleFtsSchema(db);
+            if (ftsCreated) {
+              await _rebuildArticleFts(db);
+            }
           }
         },
       ),
     );
+    _articleFtsAvailable = await _hasArticleFtsTable(database);
     _database = database;
     return database;
   }
@@ -84,7 +94,6 @@ class ArticleDatabase {
     await db.execute(
       'CREATE INDEX articles_category_id_idx ON articles(category_id)',
     );
-    await _createArticleFtsSchema(db);
     await db.execute('''
       CREATE TABLE categories (
         id TEXT PRIMARY KEY,
@@ -98,14 +107,45 @@ class ArticleDatabase {
     );
   }
 
-  Future<void> _createArticleFtsSchema(DatabaseExecutor db) async {
-    await db.execute('''
-      CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
-        id UNINDEXED,
-        title,
-        content
-      )
-    ''');
+  Future<bool> _tryCreateArticleFtsSchema(DatabaseExecutor db) async {
+    if (!_enableFullTextSearch) {
+      return false;
+    }
+
+    try {
+      await db.execute('''
+        CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
+          id UNINDEXED,
+          title,
+          content
+        )
+      ''');
+      return true;
+    } on DatabaseException catch (error) {
+      if (_isMissingFtsModule(error)) {
+        return false;
+      }
+      rethrow;
+    }
+  }
+
+  bool _isMissingFtsModule(DatabaseException error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('no such module') && message.contains('fts5');
+  }
+
+  Future<bool> _hasArticleFtsTable(Database db) async {
+    if (!_enableFullTextSearch) {
+      return false;
+    }
+    final rows = await db.query(
+      'sqlite_master',
+      columns: ['name'],
+      where: 'type = ? AND name = ?',
+      whereArgs: ['table', 'articles_fts'],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   Future<void> _rebuildArticleFts(DatabaseExecutor db) async {
@@ -124,6 +164,9 @@ class ArticleDatabase {
         article.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+      if (!_articleFtsAvailable) {
+        return;
+      }
       await txn.delete(
         'articles_fts',
         where: 'id = ?',
@@ -161,6 +204,10 @@ class ArticleDatabase {
     }
 
     final db = await _db;
+    if (!_articleFtsAvailable) {
+      return _searchArticlesLike(db, normalized);
+    }
+
     final List<Map<String, Object?>> rows;
     try {
       rows = await db.rawQuery(
@@ -203,6 +250,9 @@ class ArticleDatabase {
     final db = await _db;
     await db.transaction((txn) async {
       await txn.delete('articles', where: 'id = ?', whereArgs: [id]);
+      if (!_articleFtsAvailable) {
+        return;
+      }
       await txn.delete('articles_fts', where: 'id = ?', whereArgs: [id]);
     });
   }

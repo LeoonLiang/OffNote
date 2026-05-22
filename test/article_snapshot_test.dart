@@ -71,5 +71,40 @@ void main() {
       expect(snapshot.content, isNot(contains('打开 App')));
       expect(snapshot.content, isNot(contains('相关推荐')));
     });
+
+    test('extracts publish time from ld json metadata', () {
+      const html = '''
+      <html>
+        <head>
+          <meta property="og:title" content="露营笔记">
+          <meta name="description" content="正文">
+          <script type="application/ld+json">{
+            "headline": "露营笔记",
+            "datePublished": "2026-05-20T08:30:00+08:00"
+          }</script>
+        </head>
+        <body><main><p>正文</p></main></body>
+      </html>
+      ''';
+
+      final snapshot = parseArticleSnapshot(
+        html: html,
+        sourceUrl: 'https://example.com/a',
+      );
+
+      expect(snapshot.publishedAt, DateTime.parse('2026-05-20T08:30:00+08:00'));
+    });
+
+    test('falls back to share apptime as publish time', () {
+      final snapshot = parseArticleSnapshot(
+        html: '<html><body><p>正文</p></body></html>',
+        sourceUrl: 'https://xhslink.com/a?apptime=1754035806',
+      );
+
+      expect(
+        snapshot.publishedAt,
+        DateTime.fromMillisecondsSinceEpoch(1754035806000),
+      );
+    });
   });
 }

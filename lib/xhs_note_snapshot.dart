@@ -14,6 +14,7 @@ class XhsNoteSnapshot {
     this.posterUrl,
     this.authorName,
     this.authorAvatarUrl,
+    this.publishedAt,
   });
 
   final String title;
@@ -23,6 +24,7 @@ class XhsNoteSnapshot {
   final String? posterUrl;
   final String? authorName;
   final String? authorAvatarUrl;
+  final DateTime? publishedAt;
 }
 
 XhsNoteSnapshot? parseXhsNoteSnapshot({
@@ -62,6 +64,9 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
   final imageUrls = _extractImageUrlsFromNote(note, sourceUrl);
   final videoUrl = _extractVideoUrlFromNote(note, sourceUrl);
   final posterUrl = _extractPosterUrlFromHtml(html, sourceUrl);
+  final publishedAt =
+      _extractPublishTimeFromNote(note) ??
+      extractPublishTimeFromHtml(html, sourceUrl);
 
   if (title == null ||
       content == null ||
@@ -77,6 +82,7 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
     posterUrl: posterUrl,
     authorName: authorName,
     authorAvatarUrl: authorAvatar.isEmpty ? null : authorAvatar,
+    publishedAt: publishedAt,
   );
 }
 
@@ -127,6 +133,9 @@ XhsNoteSnapshot? _parseRenderedNoteSnapshot({
         '',
     sourceUrl,
   );
+  final publishedAt =
+      (jsonNote == null ? null : _extractPublishTimeFromNote(jsonNote)) ??
+      extractPublishTimeFromHtml(html, sourceUrl);
 
   if (title == null || content == null || imageUrls.isEmpty) {
     return null;
@@ -138,7 +147,25 @@ XhsNoteSnapshot? _parseRenderedNoteSnapshot({
     imageUrls: imageUrls.toList(growable: false),
     authorName: authorName,
     authorAvatarUrl: authorAvatar.isEmpty ? null : authorAvatar,
+    publishedAt: publishedAt,
   );
+}
+
+DateTime? _extractPublishTimeFromNote(Map<dynamic, dynamic> note) {
+  for (final key in [
+    'time',
+    'publishTime',
+    'publishTimeMills',
+    'publishTimeMillis',
+    'lastUpdateTime',
+    'timestamp',
+  ]) {
+    final parsed = parsePublishTimeValue(note[key]);
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 Map<String, dynamic>? _decodeInitialState(String html) {

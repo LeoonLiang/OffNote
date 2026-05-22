@@ -155,6 +155,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         store: _store,
         onChanged: _refresh,
         searchable: true,
+        actions: [
+          IconButton(
+            onPressed: _openStorageStats,
+            tooltip: '使用统计',
+            icon: const Icon(Icons.query_stats_rounded),
+          ),
+        ],
       ),
       CategoryPage(
         key: ValueKey('category-$_refreshTick'),
@@ -200,6 +207,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _openStorageStats() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => StorageStatsPage(store: _store)),
     );
   }
 }

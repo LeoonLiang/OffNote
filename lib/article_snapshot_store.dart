@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'article_database.dart';
 import 'article_file_paths.dart';
 import 'article_snapshot.dart';
+import 'article_storage_stats.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 import 'xhs_offline_html.dart';
@@ -71,6 +72,12 @@ class ArticleSnapshotStore {
       final localImages = imageDir.existsSync()
           ? imageDir.listSync().whereType<File>().toList(growable: false)
           : <File>[];
+      final downloadedImagePaths = snapshot.imageUrls
+          .map((url) => localImageUrisByUrl[url])
+          .map(_filePathFromFileUri)
+          .whereType<String>()
+          .toList(growable: false);
+      final now = DateTime.now();
       final article = SavedArticle(
         id: id,
         title: snapshot.title,
@@ -80,7 +87,9 @@ class ArticleSnapshotStore {
             _filePathFromFileUri(localPosterUri) ??
             (localImages.isEmpty ? null : localImages.first.path),
         sourceUrl: sourceUrl,
-        publishedAt: DateTime.now(),
+        publishedAt: snapshot.publishedAt ?? now,
+        savedAt: now,
+        imagePaths: downloadedImagePaths,
         mediaType: snapshot.videoUrl == null
             ? ArticleMediaType.image
             : ArticleMediaType.video,
@@ -100,12 +109,39 @@ class ArticleSnapshotStore {
 
   Future<List<SavedArticle>> listArticles() => _database.listArticles();
 
+  Future<List<SavedArticle>> listArticlesPage({
+    int limit = 20,
+    int offset = 0,
+  }) {
+    return _database.listArticlesPage(limit: limit, offset: offset);
+  }
+
   Future<List<SavedArticle>> listArticlesByCategory(String categoryId) {
     return _database.listArticlesByCategory(categoryId);
   }
 
+  Future<List<SavedArticle>> listArticlesByCategoryPage(
+    String categoryId, {
+    int limit = 20,
+    int offset = 0,
+  }) {
+    return _database.listArticlesByCategoryPage(
+      categoryId,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) {
     return _database.searchArticles(query);
+  }
+
+  Future<List<SavedArticle>> searchArticlesPage(
+    String query, {
+    int limit = 20,
+    int offset = 0,
+  }) {
+    return _database.searchArticlesPage(query, limit: limit, offset: offset);
   }
 
   Future<List<SavedCategory>> listCategories() => _database.listCategories();
@@ -126,6 +162,21 @@ class ArticleSnapshotStore {
     return _database.assignArticleCategory(articleId, categoryId);
   }
 
+  Future<void> updateArticleRemark(String articleId, String remark) {
+    return _database.updateArticleRemark(articleId, remark);
+  }
+
+  Future<ArticleStorageStats> loadStorageStats() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final articles = await _database.listArticles();
+    final categories = await _database.listCategories();
+    return ArticleStorageStats.calculate(
+      documentsDirectory: documentsDirectory,
+      articles: articles,
+      categoryCount: categories.length,
+    );
+  }
+
   Future<void> deleteArticle(SavedArticle article) async {
     await _database.deleteArticle(article.id);
     final articleDir = Directory(
@@ -135,6 +186,19 @@ class ArticleSnapshotStore {
       await articleDir.delete(recursive: true);
     }
     debugPrint('Deleted snapshot id=${article.id} html=${article.htmlPath}');
+  }
+
+  Future<void> deleteArticles(Iterable<SavedArticle> articles) async {
+    final items = articles.toList(growable: false);
+    await _database.deleteArticles(items.map((article) => article.id));
+    for (final article in items) {
+      final articleDir = Directory(
+        articleDirectoryPathFromHtmlPath(article.htmlPath),
+      );
+      if (articleDir.existsSync()) {
+        await articleDir.delete(recursive: true);
+      }
+    }
   }
 
   Future<Map<String, String>> _downloadImages({

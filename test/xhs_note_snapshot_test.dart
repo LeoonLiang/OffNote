@@ -12,6 +12,7 @@ void main() {
             "note":{"noteDetailMap":{"688c":{"note":{
               "title":"格木村，让我来帮你宣传好了！",
               "desc":"徒步格聂扎营格木村\\n#这里是格聂[话题]#",
+              "time":1754035806000,
               "user":{
                 "nickName":"蓝蓝",
                 "avatar":"https:\\/\\/sns-avatar-qc.xhscdn.com\\/avatar\\/demo.jpg"
@@ -41,6 +42,10 @@ void main() {
     );
     expect(snapshot.content, contains('徒步格聂扎营格木村'));
     expect(snapshot.content, contains('\n')); // newlines must be preserved
+    expect(
+      snapshot.publishedAt,
+      DateTime.fromMillisecondsSinceEpoch(1754035806000),
+    );
     expect(snapshot.imageUrls, [
       'https://sns-webpic-qc.xhscdn.com/a.jpg',
       'https://sns-webpic-qc.xhscdn.com/b.jpg',
@@ -190,5 +195,36 @@ void main() {
       'https://sns-video-v6.xhscdn.com/stream/large.mp4?sign=abc',
     );
     expect(snapshot.posterUrl, 'https://sns-webpic-qc.xhscdn.com/poster.jpg');
+  });
+
+  test('extracts publish time from ld json when rendered carousel is used', () {
+    const html = '''
+    <html>
+      <head>
+        <title>格木村，让我来帮你宣传好了！ - 小红书</title>
+        <meta name="description" content="正文内容">
+        <script type="application/ld+json">{
+          "datePublished": "1754035806000:00",
+          "author": {"name": "蓝蓝"}
+        }</script>
+      </head>
+      <body>
+        <div class="image-gallery-container">
+          <div class="onix-carousel-item"><img src="http://sns-webpic-qc.xhscdn.com/a.jpg"></div>
+        </div>
+      </body>
+    </html>
+    ''';
+
+    final snapshot = parseXhsNoteSnapshot(
+      html: html,
+      sourceUrl: 'https://www.xiaohongshu.com/discovery/item/demo',
+    );
+
+    expect(snapshot, isNotNull);
+    expect(
+      snapshot!.publishedAt,
+      DateTime.fromMillisecondsSinceEpoch(1754035806000),
+    );
   });
 }

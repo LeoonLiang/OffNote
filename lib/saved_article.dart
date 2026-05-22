@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 enum ArticleMediaType {
   image('image'),
   video('video');
@@ -23,6 +25,9 @@ class SavedArticle {
     required this.coverPath,
     required this.sourceUrl,
     required this.publishedAt,
+    required this.savedAt,
+    this.imagePaths = const [],
+    this.remark = '',
     this.mediaType = ArticleMediaType.image,
     this.categoryId,
   });
@@ -34,6 +39,9 @@ class SavedArticle {
   final String? coverPath;
   final String sourceUrl;
   final DateTime publishedAt;
+  final DateTime savedAt;
+  final List<String> imagePaths;
+  final String remark;
   final ArticleMediaType mediaType;
   final String? categoryId;
 
@@ -46,8 +54,11 @@ class SavedArticle {
       'cover_path': coverPath,
       'source_url': sourceUrl,
       'published_at': publishedAt.millisecondsSinceEpoch,
+      'saved_at': savedAt.millisecondsSinceEpoch,
       'media_type': mediaType.value,
       'category_id': categoryId,
+      'image_paths': jsonEncode(imagePaths),
+      'remark': remark,
     };
   }
 
@@ -59,13 +70,22 @@ class SavedArticle {
       htmlPath: map['html_path'] as String,
       coverPath: map['cover_path'] as String?,
       sourceUrl: map['source_url'] as String? ?? '',
-      publishedAt: DateTime.fromMillisecondsSinceEpoch(map['published_at'] as int),
+      publishedAt: DateTime.fromMillisecondsSinceEpoch(
+        _intValue(map['published_at']),
+      ),
+      savedAt: DateTime.fromMillisecondsSinceEpoch(
+        _intValue(map['saved_at'] ?? map['published_at']),
+      ),
       mediaType: ArticleMediaType.fromValue(map['media_type']),
       categoryId: map['category_id'] as String?,
+      imagePaths: _decodeStringList(map['image_paths']),
+      remark: map['remark'] as String? ?? '',
     );
   }
 
-  SavedArticle copyWith({String? categoryId}) {
+  static const _unset = Object();
+
+  SavedArticle copyWith({Object? categoryId = _unset, String? remark}) {
     return SavedArticle(
       id: id,
       title: title,
@@ -74,8 +94,41 @@ class SavedArticle {
       coverPath: coverPath,
       sourceUrl: sourceUrl,
       publishedAt: publishedAt,
+      savedAt: savedAt,
+      imagePaths: imagePaths,
+      remark: remark ?? this.remark,
       mediaType: mediaType,
-      categoryId: categoryId,
+      categoryId: identical(categoryId, _unset)
+          ? this.categoryId
+          : categoryId as String?,
     );
+  }
+
+  static int _intValue(Object? value) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      return int.tryParse(value) ?? 0;
+    }
+    return 0;
+  }
+
+  static List<String> _decodeStringList(Object? value) {
+    if (value is! String || value.trim().isEmpty) {
+      return const [];
+    }
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is List) {
+        return decoded.whereType<String>().toList(growable: false);
+      }
+    } catch (_) {
+      return const [];
+    }
+    return const [];
   }
 }

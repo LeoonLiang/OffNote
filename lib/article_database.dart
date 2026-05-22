@@ -32,7 +32,7 @@ class ArticleDatabase {
     final database = await (_databaseFactory ?? databaseFactory).openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 6,
         onCreate: (db, version) async {
           await _createSchema(db);
           await _tryCreateArticleFtsSchema(db);
@@ -58,10 +58,7 @@ class ArticleDatabase {
             );
           }
           if (oldVersion < 3) {
-            final ftsCreated = await _tryCreateArticleFtsSchema(db);
-            if (ftsCreated) {
-              await _rebuildArticleFts(db);
-            }
+            await _tryCreateArticleFtsSchema(db);
           }
           if (oldVersion < 4) {
             await _addMediaTypeColumn(db);
@@ -69,6 +66,9 @@ class ArticleDatabase {
           }
           if (oldVersion < 5) {
             await _migrateToPublishedAt(db);
+          }
+          if (oldVersion < 6) {
+            await _migrateToSavedAtAndRemark(db);
           }
         },
       ),
@@ -93,9 +93,11 @@ class ArticleDatabase {
         cover_path TEXT,
         source_url TEXT,
         published_at INTEGER,
+        saved_at INTEGER,
         media_type TEXT NOT NULL DEFAULT 'image',
         category_id TEXT,
-        image_paths TEXT
+        image_paths TEXT,
+        remark TEXT NOT NULL DEFAULT ''
       )
     ''');
     await db.execute(
@@ -128,7 +130,8 @@ class ArticleDatabase {
         CREATE VIRTUAL TABLE IF NOT EXISTS articles_fts USING fts5(
           id UNINDEXED,
           title,
-          content
+          content,
+          remark
         )
       ''');
       return true;
@@ -162,8 +165,8 @@ class ArticleDatabase {
   Future<void> _rebuildArticleFts(DatabaseExecutor db) async {
     await db.delete('articles_fts');
     await db.execute('''
-      INSERT INTO articles_fts(id, title, content)
-      SELECT id, COALESCE(title, ''), COALESCE(content, '') FROM articles
+      INSERT INTO articles_fts(id, title, content, remark)
+      SELECT id, COALESCE(title, ''), COALESCE(content, ''), COALESCE(remark, '') FROM articles
     ''');
   }
 
@@ -209,9 +212,11 @@ class ArticleDatabase {
         cover_path TEXT,
         source_url TEXT,
         published_at INTEGER,
+        saved_at INTEGER,
         media_type TEXT NOT NULL DEFAULT 'image',
         category_id TEXT,
-        image_paths TEXT
+        image_paths TEXT,
+        remark TEXT NOT NULL DEFAULT ''
       )
     ''');
 
@@ -219,11 +224,11 @@ class ArticleDatabase {
     await db.execute('''
       INSERT INTO articles_new (
         id, title, content, html_path, cover_path, source_url,
-        published_at, media_type, category_id, image_paths
+        published_at, saved_at, media_type, category_id, image_paths, remark
       )
       SELECT
         id, title, content, html_path, cover_path, source_url,
-        published_at, media_type, category_id, image_paths
+        published_at, created_at, media_type, category_id, image_paths, ''
       FROM articles
     ''');
 
@@ -239,6 +244,46 @@ class ArticleDatabase {
     await db.execute(
       'CREATE INDEX articles_category_id_idx ON articles(category_id)',
     );
+  }
+
+  Future<void> _migrateToSavedAtAndRemark(DatabaseExecutor db) async {
+    await _addColumnIfMissing(db, 'articles', 'saved_at', 'INTEGER');
+    await _addColumnIfMissing(
+      db,
+      'articles',
+      'remark',
+      "TEXT NOT NULL DEFAULT ''",
+    );
+    await db.execute(
+      'UPDATE articles SET saved_at = COALESCE(saved_at, published_at)',
+    );
+    if (await _hasArticleFtsTableInExecutor(db)) {
+      await db.execute('DROP TABLE articles_fts');
+    }
+    final ftsCreated = await _tryCreateArticleFtsSchema(db);
+    if (ftsCreated) {
+      await _rebuildArticleFts(db);
+    }
+  }
+
+  Future<void> _addColumnIfMissing(
+    DatabaseExecutor db,
+    String table,
+    String column,
+    String definition,
+  ) async {
+    final columns = await db.rawQuery('PRAGMA table_info($table)');
+    final exists = columns.any((row) => row['name'] == column);
+    if (!exists) {
+      await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+    }
+  }
+
+  Future<bool> _hasArticleFtsTableInExecutor(DatabaseExecutor db) async {
+    final rows = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'articles_fts' LIMIT 1",
+    );
+    return rows.isNotEmpty;
   }
 
   ArticleMediaType _inferMediaTypeFromHtmlPath(String htmlPath) {
@@ -277,6 +322,7 @@ class ArticleDatabase {
         'id': article.id,
         'title': article.title,
         'content': article.content,
+        'remark': article.remark,
       });
     });
   }
@@ -284,6 +330,20 @@ class ArticleDatabase {
   Future<List<SavedArticle>> listArticles() async {
     final db = await _db;
     final rows = await db.query('articles', orderBy: 'published_at DESC');
+    return rows.map(SavedArticle.fromMap).toList(growable: false);
+  }
+
+  Future<List<SavedArticle>> listArticlesPage({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final rows = await db.query(
+      'articles',
+      orderBy: 'published_at DESC',
+      limit: limit,
+      offset: offset,
+    );
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
 
@@ -298,15 +358,40 @@ class ArticleDatabase {
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
 
+  Future<List<SavedArticle>> listArticlesByCategoryPage(
+    String categoryId, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final rows = await db.query(
+      'articles',
+      where: 'category_id = ?',
+      whereArgs: [categoryId],
+      orderBy: 'published_at DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return rows.map(SavedArticle.fromMap).toList(growable: false);
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) async {
+    return searchArticlesPage(query, limit: 100000);
+  }
+
+  Future<List<SavedArticle>> searchArticlesPage(
+    String query, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
     final normalized = query.trim();
     if (normalized.isEmpty) {
-      return listArticles();
+      return listArticlesPage(limit: limit, offset: offset);
     }
 
     final db = await _db;
     if (!_articleFtsAvailable) {
-      return _searchArticlesLike(db, normalized);
+      return _searchArticlesLike(db, normalized, limit: limit, offset: offset);
     }
 
     final List<Map<String, Object?>> rows;
@@ -318,27 +403,32 @@ class ArticleDatabase {
         JOIN articles_fts ON articles_fts.id = articles.id
         WHERE articles_fts MATCH ?
         ORDER BY articles.published_at DESC
+        LIMIT ? OFFSET ?
         ''',
-        [_ftsQuery(normalized)],
+        [_ftsQuery(normalized), limit, offset],
       );
     } on DatabaseException {
-      return _searchArticlesLike(db, normalized);
+      return _searchArticlesLike(db, normalized, limit: limit, offset: offset);
     }
     if (rows.isEmpty || normalized.runes.length < 3) {
-      return _searchArticlesLike(db, normalized);
+      return _searchArticlesLike(db, normalized, limit: limit, offset: offset);
     }
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
 
   Future<List<SavedArticle>> _searchArticlesLike(
     Database db,
-    String query,
-  ) async {
+    String query, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
     final rows = await db.query(
       'articles',
-      where: 'title LIKE ? OR content LIKE ?',
-      whereArgs: ['%$query%', '%$query%'],
+      where: 'title LIKE ? OR content LIKE ? OR remark LIKE ?',
+      whereArgs: ['%$query%', '%$query%', '%$query%'],
       orderBy: 'published_at DESC',
+      limit: limit,
+      offset: offset,
     );
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
@@ -355,6 +445,54 @@ class ArticleDatabase {
         return;
       }
       await txn.delete('articles_fts', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  Future<void> deleteArticles(Iterable<String> ids) async {
+    final uniqueIds = ids.toSet();
+    if (uniqueIds.isEmpty) {
+      return;
+    }
+    final db = await _db;
+    await db.transaction((txn) async {
+      for (final id in uniqueIds) {
+        await txn.delete('articles', where: 'id = ?', whereArgs: [id]);
+        if (_articleFtsAvailable) {
+          await txn.delete('articles_fts', where: 'id = ?', whereArgs: [id]);
+        }
+      }
+    });
+  }
+
+  Future<void> updateArticleRemark(String articleId, String remark) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.update(
+        'articles',
+        {'remark': remark.trim()},
+        where: 'id = ?',
+        whereArgs: [articleId],
+      );
+      if (!_articleFtsAvailable) {
+        return;
+      }
+      final rows = await txn.query(
+        'articles',
+        columns: ['id', 'title', 'content', 'remark'],
+        where: 'id = ?',
+        whereArgs: [articleId],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        return;
+      }
+      await txn.delete('articles_fts', where: 'id = ?', whereArgs: [articleId]);
+      await txn.insert('articles_fts', {
+        'id': rows.single['id'],
+        'title': rows.single['title'] ?? '',
+        'content': rows.single['content'] ?? '',
+        'remark': rows.single['remark'] ?? '',
+      });
     });
   }
 

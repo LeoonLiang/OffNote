@@ -14,6 +14,7 @@ class ArticleSnapshot {
     this.posterUrl,
     this.authorName,
     this.authorAvatarUrl,
+    this.publishedAt,
   });
 
   final String title;
@@ -25,6 +26,7 @@ class ArticleSnapshot {
   final String? posterUrl;
   final String? authorName;
   final String? authorAvatarUrl;
+  final DateTime? publishedAt;
 }
 
 ArticleSnapshot parseArticleSnapshot({
@@ -43,6 +45,7 @@ ArticleSnapshot parseArticleSnapshot({
       posterUrl: xhsSnapshot.posterUrl,
       authorName: xhsSnapshot.authorName,
       authorAvatarUrl: xhsSnapshot.authorAvatarUrl,
+      publishedAt: xhsSnapshot.publishedAt,
     );
   }
 
@@ -66,7 +69,86 @@ ArticleSnapshot parseArticleSnapshot({
     sourceUrl: sourceUrl,
     html: document.outerHtml,
     imageUrls: imageUrls,
+    publishedAt: extractPublishTimeFromHtml(html, sourceUrl),
   );
+}
+
+DateTime? extractPublishTimeFromHtml(String html, String sourceUrl) {
+  final document = html_parser.parse(html);
+  final metadataTime = _firstParsedPublishTime([
+    document
+        .querySelector('meta[property="article:published_time"]')
+        ?.attributes['content'],
+    document.querySelector('meta[name="publishdate"]')?.attributes['content'],
+    document.querySelector('meta[name="date"]')?.attributes['content'],
+    document.querySelector('time[datetime]')?.attributes['datetime'],
+    ...document
+        .querySelectorAll('script[type="application/ld+json"]')
+        .map((script) => _ldJsonPublishValue(script.text)),
+  ]);
+  if (metadataTime != null) {
+    return metadataTime;
+  }
+
+  final uri = Uri.tryParse(sourceUrl);
+  final apptime = uri?.queryParameters['apptime'];
+  return parsePublishTimeValue(apptime);
+}
+
+DateTime? parsePublishTimeValue(Object? value) {
+  if (value is num) {
+    return _timestampToDateTime(value.toInt());
+  }
+  if (value is! String) {
+    return null;
+  }
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return null;
+  }
+
+  final numericPrefix = RegExp(r'^\d{10,17}').firstMatch(trimmed)?.group(0);
+  if (numericPrefix != null) {
+    return _timestampToDateTime(int.parse(numericPrefix));
+  }
+  return DateTime.tryParse(trimmed);
+}
+
+DateTime? _firstParsedPublishTime(Iterable<Object?> values) {
+  for (final value in values) {
+    final parsed = parsePublishTimeValue(value);
+    if (parsed != null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+Object? _ldJsonPublishValue(String rawJson) {
+  final patterns = [
+    RegExp(r'"datePublished"\s*:\s*"([^"]+)"'),
+    RegExp(r'"uploadDate"\s*:\s*"([^"]+)"'),
+  ];
+  for (final pattern in patterns) {
+    final match = pattern.firstMatch(rawJson);
+    if (match != null) {
+      return match.group(1);
+    }
+  }
+  return null;
+}
+
+DateTime? _timestampToDateTime(int timestamp) {
+  if (timestamp <= 0) {
+    return null;
+  }
+  if (timestamp < 100000000000) {
+    return DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+  }
+  if (timestamp > 9999999999999) {
+    return DateTime.fromMicrosecondsSinceEpoch(timestamp);
+  }
+  return DateTime.fromMillisecondsSinceEpoch(timestamp);
 }
 
 String _extractContent(dom.Document document) {

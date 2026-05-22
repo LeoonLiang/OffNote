@@ -7,6 +7,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   late DatabaseFactory databaseFactory;
+  var databaseCounter = 0;
 
   setUpAll(() {
     sqfliteFfiInit();
@@ -22,6 +23,9 @@ void main() {
     required String content,
     ArticleMediaType mediaType = ArticleMediaType.image,
     int publishedAt = 1000,
+    int savedAt = 2000,
+    List<String> imagePaths = const [],
+    String remark = '',
   }) {
     return SavedArticle(
       id: id,
@@ -31,11 +35,19 @@ void main() {
       coverPath: null,
       sourceUrl: 'https://example.com/$id',
       publishedAt: DateTime.fromMillisecondsSinceEpoch(publishedAt),
+      savedAt: DateTime.fromMillisecondsSinceEpoch(savedAt),
       mediaType: mediaType,
+      imagePaths: imagePaths,
+      remark: remark,
     );
   }
 
   Future<ArticleDatabase> openTestDatabase(String path) async {
+    if (path == inMemoryDatabasePath) {
+      final root = await databaseFactory.getDatabasesPath();
+      path = '$root/offnote-test-${databaseCounter++}.db';
+      await databaseFactory.deleteDatabase(path);
+    }
     return ArticleDatabase(
       databaseFactory: databaseFactory,
       databasePath: path,
@@ -43,6 +55,11 @@ void main() {
   }
 
   Future<ArticleDatabase> openTestDatabaseWithoutFts(String path) async {
+    if (path == inMemoryDatabasePath) {
+      final root = await databaseFactory.getDatabasesPath();
+      path = '$root/offnote-test-no-fts-${databaseCounter++}.db';
+      await databaseFactory.deleteDatabase(path);
+    }
     return ArticleDatabase(
       databaseFactory: databaseFactory,
       databasePath: path,
@@ -77,6 +94,56 @@ void main() {
       (article) => article.id == 'video',
     );
     expect(saved.mediaType, ArticleMediaType.video);
+  });
+
+  test('persists image paths and remark', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(
+        id: 'a1',
+        title: '图文笔记',
+        content: '正文',
+        imagePaths: ['/tmp/a.jpg', '/tmp/b.jpg'],
+        remark: '下次复盘用',
+      ),
+    );
+
+    final saved = (await db.listArticles()).single;
+    expect(saved.imagePaths, ['/tmp/a.jpg', '/tmp/b.jpg']);
+    expect(saved.remark, '下次复盘用');
+  });
+
+  test('lists articles by page ordered by publish time', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(id: 'old', title: '旧', content: '', publishedAt: 1),
+    );
+    await db.upsertArticle(
+      article(id: 'middle', title: '中', content: '', publishedAt: 2),
+    );
+    await db.upsertArticle(
+      article(id: 'new', title: '新', content: '', publishedAt: 3),
+    );
+
+    final firstPage = await db.listArticlesPage(limit: 2, offset: 0);
+    final secondPage = await db.listArticlesPage(limit: 2, offset: 2);
+
+    expect(firstPage.map((article) => article.id), ['new', 'middle']);
+    expect(secondPage.map((article) => article.id), ['old']);
+  });
+
+  test('updates and searches article remarks', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(article(id: 'a1', title: '普通标题', content: '普通正文'));
+    await db.updateArticleRemark('a1', '这里有雪山行程');
+
+    final results = await db.searchArticles('雪山行程');
+
+    expect(results.map((article) => article.id), ['a1']);
+    expect(results.single.remark, '这里有雪山行程');
   });
 
   test(

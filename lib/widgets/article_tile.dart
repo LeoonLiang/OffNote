@@ -4,54 +4,51 @@ class _ArticleTile extends StatelessWidget {
   const _ArticleTile({
     required this.article,
     required this.onTap,
+    required this.selected,
+    required this.selectionMode,
+    this.onLongPress,
     this.onDelete,
   });
 
   final SavedArticle article;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback? onDelete;
+  final bool selected;
+  final bool selectionMode;
 
   @override
   Widget build(BuildContext context) {
-    final coverPath = article.coverPath;
     final theme = ShadTheme.of(context);
-    final isVideo = article.mediaType == ArticleMediaType.video;
     return ShadCard(
       padding: EdgeInsets.zero,
-      radius: BorderRadius.circular(18),
-      border: ShadBorder.all(color: theme.colorScheme.border),
-      shadows: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.035),
-          blurRadius: 20,
-          offset: const Offset(0, 10),
-        ),
-      ],
+      radius: BorderRadius.circular(8),
+      border: ShadBorder.all(
+        color: selected ? _accent : theme.colorScheme.border,
+        width: selected ? 1.5 : 1,
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(8),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: 86,
-                  height: 76,
-                  child: coverPath == null
-                      ? ColoredBox(
-                          color: _accentSoft,
-                          child: Icon(
-                            isVideo
-                                ? Icons.play_circle_outline_rounded
-                                : Icons.article_outlined,
-                            color: _accent,
-                          ),
-                        )
-                      : Image.file(File(coverPath), fit: BoxFit.cover),
+              if (selectionMode) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 40),
+                  child: Icon(
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    color: selected ? _accent : Colors.black26,
+                  ),
                 ),
-              ),
+                const SizedBox(width: 10),
+              ],
+              _ArticleMediaPreview(article: article),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -70,7 +67,7 @@ class _ArticleTile extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       article.content,
-                      maxLines: 2,
+                      maxLines: article.remark.isEmpty ? 3 : 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: _muted,
@@ -78,6 +75,31 @@ class _ArticleTile extends StatelessWidget {
                         height: 1.35,
                       ),
                     ),
+                    if (article.remark.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.sticky_note_2_outlined,
+                            size: 14,
+                            color: _accent,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              article.remark,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _ink,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -100,6 +122,106 @@ class _ArticleTile extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ArticleMediaPreview extends StatelessWidget {
+  const _ArticleMediaPreview({required this.article});
+
+  final SavedArticle article;
+
+  @override
+  Widget build(BuildContext context) {
+    final paths = article.imagePaths.isNotEmpty
+        ? article.imagePaths
+        : [if (article.coverPath != null) article.coverPath!];
+    final isVideo = article.mediaType == ArticleMediaType.video;
+    if (paths.isEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 108,
+          height: 108,
+          child: ColoredBox(
+            color: _accentSoft,
+            child: Icon(
+              isVideo
+                  ? Icons.play_circle_outline_rounded
+                  : Icons.article_outlined,
+              color: _accent,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (isVideo || paths.length == 1) {
+      return _PreviewImage(path: paths.first, isVideo: isVideo);
+    }
+
+    return SizedBox(
+      width: 108,
+      height: 108,
+      child: GridView.builder(
+        padding: EdgeInsets.zero,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          crossAxisSpacing: 3,
+          mainAxisSpacing: 3,
+        ),
+        itemCount: paths.take(9).length,
+        itemBuilder: (context, index) =>
+            _PreviewImage(path: paths[index], radius: 4, isVideo: false),
+      ),
+    );
+  }
+}
+
+class _PreviewImage extends StatelessWidget {
+  const _PreviewImage({
+    required this.path,
+    required this.isVideo,
+    this.radius = 8,
+  });
+
+  final String path;
+  final bool isVideo;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: SizedBox(
+        width: 108,
+        height: 108,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              File(path),
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const ColoredBox(
+                color: _accentSoft,
+                child: Icon(Icons.broken_image_outlined, color: _accent),
+              ),
+            ),
+            if (isVideo)
+              const ColoredBox(
+                color: Color(0x33000000),
+                child: Center(
+                  child: Icon(
+                    Icons.play_circle_fill_rounded,
+                    color: Colors.white,
+                    size: 34,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

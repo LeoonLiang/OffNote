@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -11,6 +12,7 @@ import 'article_snapshot_store.dart';
 import 'article_capture_service.dart';
 import 'article_storage_stats.dart';
 import 'link_parser.dart';
+import 'offnote_video_player.dart';
 import 'save_queue.dart';
 import 'save_failure_message.dart';
 import 'saved_article.dart';
@@ -31,6 +33,7 @@ part 'widgets/empty_states.dart';
 part 'date_label.dart';
 
 void main() {
+  MediaKit.ensureInitialized();
   runApp(const OffNoteApp());
 }
 

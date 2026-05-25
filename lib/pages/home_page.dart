@@ -210,11 +210,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           child: const Icon(Icons.playlist_add_check_rounded),
         ),
       ),
-      IconButton(
-        onPressed: _openStorageStats,
-        tooltip: '使用统计',
-        icon: const Icon(Icons.query_stats_rounded),
-      ),
     ];
     final pages = [
       ArticleListPage(
@@ -234,6 +229,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       CategoryPage(
         key: ValueKey('category-$_refreshTick'),
         store: _store,
+        onChanged: _refresh,
+      ),
+      SettingsPage(
+        key: ValueKey('settings-$_refreshTick'),
+        store: _store,
+        queue: _saveQueue,
         onChanged: _refresh,
       ),
     ];
@@ -276,16 +277,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 label: '分类',
                 onTap: () => setState(() => _index = 2),
               ),
+              _NavItem(
+                selected: _index == 3,
+                icon: Icons.settings_rounded,
+                label: '设置',
+                onTap: () => setState(() => _index = 3),
+              ),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Future<void> _openStorageStats() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => StorageStatsPage(store: _store)),
     );
   }
 

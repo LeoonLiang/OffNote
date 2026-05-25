@@ -15,7 +15,10 @@ class ArticleCaptureService {
   final ArticleSnapshotStore _store;
   Completer<void>? _pageLoaded;
 
-  Future<SavedArticle> saveUrl(String url) async {
+  Future<SavedArticle> saveUrl(
+    String url, {
+    bool allowPartialMedia = false,
+  }) async {
     final controller = await _createController();
     _pageLoaded = Completer<void>();
     await controller.loadRequest(Uri.parse(url));
@@ -26,7 +29,11 @@ class ArticleCaptureService {
       'document.documentElement.outerHTML',
     );
     final html = decodeJavaScriptStringResult(htmlResult);
-    return _store.save(rawHtml: html, sourceUrl: sourceUrl);
+    return _store.save(
+      rawHtml: html,
+      sourceUrl: sourceUrl,
+      allowPartialMedia: allowPartialMedia,
+    );
   }
 
   Future<void> _waitForSnapshotReady(WebViewController controller) async {

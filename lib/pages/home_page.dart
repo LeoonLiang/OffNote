@@ -10,9 +10,11 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   final _store = ArticleSnapshotStore();
   late final SaveQueueController _saveQueue = SaveQueueController(
-    worker: ArticleCaptureService(store: _store).saveUrl,
+    worker: (request) => ArticleCaptureService(
+      store: _store,
+    ).saveUrl(request.url, allowPartialMedia: request.allowPartialMedia),
   );
-  final _notifiedTaskIds = <String>{};
+  final _notifiedTaskStatuses = <String, SaveQueueTaskStatus>{};
   int _index = 0;
   int _refreshTick = 0;
   String? _lastClipboard;
@@ -56,11 +58,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     setState(() {});
     for (final task in _saveQueue.tasks) {
-      if (_notifiedTaskIds.contains(task.id)) {
+      if (_notifiedTaskStatuses[task.id] == task.status) {
         continue;
       }
       if (task.status == SaveQueueTaskStatus.success && task.article != null) {
-        _notifiedTaskIds.add(task.id);
+        _notifiedTaskStatuses[task.id] = task.status;
         _refresh();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -72,9 +74,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         );
       } else if (task.status == SaveQueueTaskStatus.failed) {
-        _notifiedTaskIds.add(task.id);
+        _notifiedTaskStatuses[task.id] = task.status;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('收录失败：${task.errorMessage ?? task.url}')),
+        );
+      } else if (task.status == SaveQueueTaskStatus.needsAction) {
+        _notifiedTaskStatuses[task.id] = task.status;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${task.errorMessage ?? '媒体保存不完整'}，请在队列里处理'),
+            action: SnackBarAction(label: '查看', onPressed: _openSaveQueue),
+          ),
         );
       }
     }

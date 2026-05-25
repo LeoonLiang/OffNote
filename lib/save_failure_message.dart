@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 
+import 'media_download_failure.dart';
+
 String describeSaveFailure(Object error) {
   final text = error.toString();
   if (text.contains('没有识别到链接')) {
@@ -11,6 +13,10 @@ String describeSaveFailure(Object error) {
 
   if (error is TimeoutException || text.contains('网页内容还没加载完成')) {
     return '网页内容还没加载完整，可能是网络慢或页面被拦截。请稍后重试，或先复制链接再打开小红书确认页面可访问。';
+  }
+
+  if (error is MediaDownloadIncompleteException) {
+    return '${error.summary}。${error.detail}';
   }
 
   if (error is DioException) {

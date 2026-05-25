@@ -9,6 +9,7 @@ import 'article_database.dart';
 import 'article_file_paths.dart';
 import 'article_snapshot.dart';
 import 'article_storage_stats.dart';
+import 'media_download_failure.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 import 'xhs_offline_html.dart';
@@ -24,6 +25,7 @@ class ArticleSnapshotStore {
   Future<SavedArticle> save({
     required String rawHtml,
     required String sourceUrl,
+    bool allowPartialMedia = false,
   }) async {
     final snapshot = parseArticleSnapshot(html: rawHtml, sourceUrl: sourceUrl);
     final id = DateTime.now().microsecondsSinceEpoch.toString();
@@ -34,11 +36,11 @@ class ArticleSnapshotStore {
     try {
       await imageDir.create(recursive: true);
 
-      final localImageUrisByUrl = await _downloadImages(
+      final imageDownloads = await _downloadImages(
         snapshot: snapshot,
         imageDir: imageDir,
       );
-      final localVideoUri = await _downloadVideo(
+      final videoDownload = await _downloadVideo(
         snapshot: snapshot,
         videoDir: videoDir,
       );
@@ -50,8 +52,24 @@ class ArticleSnapshotStore {
         snapshot: snapshot,
         imageDir: imageDir,
       );
+      final localImageUrisByUrl = imageDownloads.localUrisByUrl;
+      final localVideoUri = videoDownload.localUri;
       final failedImageCount =
           snapshot.imageUrls.length - localImageUrisByUrl.length;
+      if (!allowPartialMedia) {
+        if (snapshot.videoUrl != null && localVideoUri == null) {
+          throw MediaDownloadIncompleteException.video(
+            reason: videoDownload.failureReason ?? '视频文件没有下载完成',
+          );
+        }
+        if (failedImageCount > 0) {
+          throw MediaDownloadIncompleteException.images(
+            failedCount: failedImageCount,
+            totalCount: snapshot.imageUrls.length,
+            reasons: imageDownloads.failureReasons,
+          );
+        }
+      }
       final rewrittenHtml = buildXhsOfflineHtml(
         title: snapshot.title,
         content: snapshot.content,
@@ -201,11 +219,12 @@ class ArticleSnapshotStore {
     }
   }
 
-  Future<Map<String, String>> _downloadImages({
+  Future<_ImageDownloadResult> _downloadImages({
     required ArticleSnapshot snapshot,
     required Directory imageDir,
   }) async {
     final localImageUrisByUrl = <String, String>{};
+    final failureReasons = <String>[];
 
     for (var index = 0; index < snapshot.imageUrls.length; index++) {
       final imageUrl = snapshot.imageUrls[index];
@@ -222,14 +241,18 @@ class ArticleSnapshotStore {
           ),
         );
         localImageUrisByUrl[imageUrl] = file.uri.toString();
-      } catch (_) {
+      } catch (error) {
         if (file.existsSync()) {
           file.deleteSync();
         }
+        failureReasons.add('第 ${index + 1} 张图片下载失败：${_briefError(error)}');
       }
     }
 
-    return localImageUrisByUrl;
+    return _ImageDownloadResult(
+      localUrisByUrl: localImageUrisByUrl,
+      failureReasons: failureReasons,
+    );
   }
 
   Future<String?> _downloadAuthorAvatar({
@@ -290,13 +313,13 @@ class ArticleSnapshotStore {
     }
   }
 
-  Future<String?> _downloadVideo({
+  Future<_MediaDownloadResult> _downloadVideo({
     required ArticleSnapshot snapshot,
     required Directory videoDir,
   }) async {
     final videoUrl = snapshot.videoUrl;
     if (videoUrl == null) {
-      return null;
+      return const _MediaDownloadResult();
     }
 
     await videoDir.create(recursive: true);
@@ -313,12 +336,14 @@ class ArticleSnapshotStore {
           headers: _downloadHeaders(snapshot.sourceUrl),
         ),
       );
-      return file.uri.toString();
-    } catch (_) {
+      return _MediaDownloadResult(localUri: file.uri.toString());
+    } catch (error) {
       if (file.existsSync()) {
         file.deleteSync();
       }
-      return null;
+      return _MediaDownloadResult(
+        failureReason: '视频下载失败：${_briefError(error)}',
+      );
     }
   }
 
@@ -360,4 +385,31 @@ class ArticleSnapshotStore {
     }
     return parsed.toFilePath();
   }
+
+  String _briefError(Object error) {
+    if (error is DioException) {
+      if (error.message != null && error.message!.trim().isNotEmpty) {
+        return error.message!.trim();
+      }
+      return error.type.name;
+    }
+    return error.toString();
+  }
+}
+
+class _ImageDownloadResult {
+  const _ImageDownloadResult({
+    required this.localUrisByUrl,
+    required this.failureReasons,
+  });
+
+  final Map<String, String> localUrisByUrl;
+  final List<String> failureReasons;
+}
+
+class _MediaDownloadResult {
+  const _MediaDownloadResult({this.localUri, this.failureReason});
+
+  final String? localUri;
+  final String? failureReason;
 }

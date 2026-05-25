@@ -30,7 +30,7 @@ class SaveQueuePage extends StatelessWidget {
               itemCount: tasks.length,
               separatorBuilder: (_, _) => const SizedBox(height: 10),
               itemBuilder: (context, index) =>
-                  _SaveQueueTile(task: tasks[index]),
+                  _SaveQueueTile(queue: queue, task: tasks[index]),
             ),
           );
         },
@@ -40,8 +40,9 @@ class SaveQueuePage extends StatelessWidget {
 }
 
 class _SaveQueueTile extends StatelessWidget {
-  const _SaveQueueTile({required this.task});
+  const _SaveQueueTile({required this.queue, required this.task});
 
+  final SaveQueueController queue;
   final SaveQueueTask task;
 
   @override
@@ -76,10 +77,11 @@ class _SaveQueueTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  task.status == SaveQueueTaskStatus.failed
+                  task.status == SaveQueueTaskStatus.failed ||
+                          task.status == SaveQueueTaskStatus.needsAction
                       ? task.errorMessage ?? '收录失败'
                       : status.label,
-                  maxLines: 2,
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: status.color,
@@ -88,6 +90,47 @@ class _SaveQueueTile extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                if (task.errorDetail != null &&
+                    task.errorDetail != task.errorMessage) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    task.errorDetail!,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+                if (task.status == SaveQueueTaskStatus.needsAction ||
+                    task.status == SaveQueueTaskStatus.failed) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => queue.retry(task.id),
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('重试'),
+                      ),
+                      if (task.canConfirmPartial)
+                        FilledButton.icon(
+                          onPressed: () => queue.confirmPartial(task.id),
+                          icon: const Icon(Icons.check_rounded, size: 16),
+                          label: const Text('仍然保存'),
+                        ),
+                      if (task.status == SaveQueueTaskStatus.needsAction)
+                        TextButton.icon(
+                          onPressed: () => queue.cancel(task.id),
+                          icon: const Icon(Icons.close_rounded, size: 16),
+                          label: const Text('取消'),
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -128,6 +171,22 @@ class _SaveQueueTile extends StatelessWidget {
             color: Colors.redAccent,
             size: 20,
           ),
+        );
+      case SaveQueueTaskStatus.needsAction:
+        return const _QueueStatusView(
+          label: '需要处理',
+          color: Colors.orange,
+          icon: Icon(
+            Icons.report_problem_outlined,
+            color: Colors.orange,
+            size: 20,
+          ),
+        );
+      case SaveQueueTaskStatus.cancelled:
+        return const _QueueStatusView(
+          label: '已取消',
+          color: _muted,
+          icon: Icon(Icons.cancel_outlined, color: _muted, size: 20),
         );
     }
   }

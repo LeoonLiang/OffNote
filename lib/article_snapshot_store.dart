@@ -150,6 +150,16 @@ class ArticleSnapshotStore {
     );
   }
 
+  Future<List<SavedArticle>> listUncategorizedArticlesPage({
+    int limit = 20,
+    int offset = 0,
+  }) {
+    return _database.listUncategorizedArticlesPage(
+      limit: limit,
+      offset: offset,
+    );
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) {
     return _database.searchArticles(query);
   }
@@ -158,8 +168,16 @@ class ArticleSnapshotStore {
     String query, {
     int limit = 20,
     int offset = 0,
+    String? categoryId,
+    bool uncategorizedOnly = false,
   }) {
-    return _database.searchArticlesPage(query, limit: limit, offset: offset);
+    return _database.searchArticlesPage(
+      query,
+      limit: limit,
+      offset: offset,
+      categoryId: categoryId,
+      uncategorizedOnly: uncategorizedOnly,
+    );
   }
 
   Future<List<SavedCategory>> listCategories() => _database.listCategories();

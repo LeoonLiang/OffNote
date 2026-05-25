@@ -10,7 +10,9 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import 'article_snapshot_store.dart';
 import 'article_capture_service.dart';
+import 'article_display.dart';
 import 'article_storage_stats.dart';
+import 'gallery.dart';
 import 'link_parser.dart';
 import 'offnote_video_player.dart';
 import 'save_queue.dart';
@@ -22,6 +24,7 @@ part 'theme.dart';
 part 'pages/home_page.dart';
 part 'save_article_dialog.dart';
 part 'pages/article_list_page.dart';
+part 'pages/gallery_page.dart';
 part 'pages/category_page.dart';
 part 'pages/article_detail_page.dart';
 part 'pages/storage_stats_page.dart';

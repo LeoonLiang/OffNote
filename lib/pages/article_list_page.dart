@@ -29,7 +29,11 @@ class _ArticleListPageState extends State<ArticleListPage> {
   final _scrollController = ScrollController();
   final _selectedIds = <String>{};
   final _articles = <SavedArticle>[];
+  _GalleryFilter _filter = const _GalleryFilter.all();
+  var _categories = <SavedCategory>[];
+  var _categoryNamesById = <String, String>{};
   Timer? _searchDebounce;
+  int _loadGeneration = 0;
   bool _isLoading = false;
   bool _hasMore = true;
   String? _errorText;
@@ -51,7 +55,9 @@ class _ArticleListPageState extends State<ArticleListPage> {
     super.dispose();
   }
 
-  Future<List<SavedArticle>> _loadPage(int offset) {
+  bool get _showsFolderFilter => widget.category == null;
+
+  Future<List<SavedArticle>> _loadPage(_GalleryFilter filter, int offset) {
     final category = widget.category;
     if (category != null) {
       return widget.store.listArticlesByCategoryPage(
@@ -66,15 +72,31 @@ class _ArticleListPageState extends State<ArticleListPage> {
         query,
         limit: _pageSize,
         offset: offset,
+        categoryId: filter.kind == _GalleryFilterKind.category
+            ? filter.category!.id
+            : null,
+        uncategorizedOnly: filter.kind == _GalleryFilterKind.uncategorized,
+      );
+    }
+    if (filter.kind == _GalleryFilterKind.category) {
+      return widget.store.listArticlesByCategoryPage(
+        filter.category!.id,
+        limit: _pageSize,
+        offset: offset,
+      );
+    }
+    if (filter.kind == _GalleryFilterKind.uncategorized) {
+      return widget.store.listUncategorizedArticlesPage(
+        limit: _pageSize,
+        offset: offset,
       );
     }
     return widget.store.listArticlesPage(limit: _pageSize, offset: offset);
   }
 
   Future<void> _loadFirstPage() async {
-    if (_isLoading) {
-      return;
-    }
+    final generation = ++_loadGeneration;
+    final filter = _filter;
     setState(() {
       _isLoading = true;
       _hasMore = true;
@@ -82,14 +104,23 @@ class _ArticleListPageState extends State<ArticleListPage> {
       _selectedIds.clear();
     });
     try {
-      final page = await _loadPage(0);
-      if (!mounted) {
+      final results = await Future.wait([
+        _loadPage(filter, 0),
+        widget.store.listCategories(),
+      ]);
+      if (!mounted || generation != _loadGeneration) {
         return;
       }
+      final page = results[0] as List<SavedArticle>;
+      final categories = results[1] as List<SavedCategory>;
       setState(() {
         _articles
           ..clear()
           ..addAll(page);
+        _categoryNamesById = {
+          for (final category in categories) category.id: category.name,
+        };
+        _categories = categories;
         _hasMore = page.length == _pageSize;
         _isLoading = false;
       });
@@ -108,10 +139,12 @@ class _ArticleListPageState extends State<ArticleListPage> {
     if (_isLoading || !_hasMore) {
       return;
     }
+    final generation = _loadGeneration;
+    final filter = _filter;
     setState(() => _isLoading = true);
     try {
-      final page = await _loadPage(_articles.length);
-      if (!mounted) {
+      final page = await _loadPage(filter, _articles.length);
+      if (!mounted || generation != _loadGeneration) {
         return;
       }
       setState(() {
@@ -149,6 +182,17 @@ class _ArticleListPageState extends State<ArticleListPage> {
     _searchDebounce = Timer(const Duration(milliseconds: 300), _loadFirstPage);
   }
 
+  void _selectFilter(_GalleryFilter filter) {
+    if (_filter.key == filter.key) {
+      return;
+    }
+    setState(() => _filter = filter);
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    _loadFirstPage();
+  }
+
   void _toggleSelection(SavedArticle article) {
     setState(() {
       if (!_selectedIds.add(article.id)) {
@@ -164,6 +208,11 @@ class _ArticleListPageState extends State<ArticleListPage> {
   @override
   Widget build(BuildContext context) {
     final hasQuery = _searchController.text.trim().isNotEmpty;
+    final filters = [
+      const _GalleryFilter.all(),
+      const _GalleryFilter.uncategorized(),
+      ..._categories.map(_GalleryFilter.category),
+    ];
     return Scaffold(
       appBar: AppBar(
         leading: _isSelecting
@@ -197,12 +246,49 @@ class _ArticleListPageState extends State<ArticleListPage> {
           children: [
             if (widget.searchable && !_isSelecting)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
                 child: ShadInput(
                   controller: _searchController,
                   placeholder: const Text('搜索标题、正文或备注'),
                   leading: const Icon(LucideIcons.search, size: 18),
                   onChanged: _onSearchChanged,
+                ),
+              ),
+            if (_showsFolderFilter && !_isSelecting)
+              SizedBox(
+                height: 46,
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: filters.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final filter = filters[index];
+                    final selected = filter.key == _filter.key;
+                    return ChoiceChip(
+                      selected: selected,
+                      label: Text(filter.label),
+                      avatar: filter.kind == _GalleryFilterKind.category
+                          ? Icon(
+                              Icons.folder_rounded,
+                              size: 16,
+                              color: selected
+                                  ? Colors.white
+                                  : Color(filter.category!.color),
+                            )
+                          : null,
+                      showCheckmark: false,
+                      selectedColor: _accent,
+                      labelStyle: TextStyle(
+                        color: selected ? Colors.white : _ink,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      side: BorderSide(
+                        color: selected ? _accent : const Color(0xffdedfd7),
+                      ),
+                      onSelected: (_) => _selectFilter(filter),
+                    );
+                  },
                 ),
               ),
             Expanded(
@@ -237,6 +323,10 @@ class _ArticleListPageState extends State<ArticleListPage> {
                           final article = _articles[index];
                           return _ArticleTile(
                             article: article,
+                            categoryLabel: articleCategoryLabel(
+                              article,
+                              _categoryNamesById,
+                            ),
                             selected: _selectedIds.contains(article.id),
                             selectionMode: _isSelecting,
                             onTap: () => _isSelecting

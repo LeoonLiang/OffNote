@@ -6,6 +6,7 @@ class _ArticleTile extends StatelessWidget {
     required this.onTap,
     required this.selected,
     required this.selectionMode,
+    this.categoryLabel,
     this.onLongPress,
     this.onDelete,
   });
@@ -16,6 +17,7 @@ class _ArticleTile extends StatelessWidget {
   final VoidCallback? onDelete;
   final bool selected;
   final bool selectionMode;
+  final String? categoryLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -103,8 +105,12 @@ class _ArticleTile extends StatelessWidget {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        _MediaTypeBadge(mediaType: article.mediaType),
-                        const SizedBox(width: 8),
+                        if (categoryLabel != null) ...[
+                          Flexible(
+                            child: _CategoryBadge(label: categoryLabel!),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
                         Text(
                           _dateLabel(article.publishedAt),
                           style: const TextStyle(color: _muted, fontSize: 12),
@@ -123,6 +129,43 @@ class _ArticleTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CategoryBadge extends StatelessWidget {
+  const _CategoryBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 96),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xffeef1e8),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.folder_rounded, size: 12, color: _muted),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -223,44 +266,6 @@ class _PreviewImage extends StatelessWidget {
               ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _MediaTypeBadge extends StatelessWidget {
-  const _MediaTypeBadge({required this.mediaType});
-
-  final ArticleMediaType mediaType;
-
-  @override
-  Widget build(BuildContext context) {
-    final isVideo = mediaType == ArticleMediaType.video;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: isVideo ? const Color(0xffffeff2) : _accentSoft,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isVideo ? Icons.play_arrow_rounded : Icons.image_outlined,
-            size: 12,
-            color: isVideo ? const Color(0xffff2442) : _accent,
-          ),
-          const SizedBox(width: 3),
-          Text(
-            isVideo ? '视频' : '图文',
-            style: TextStyle(
-              color: isVideo ? const Color(0xffff2442) : _accent,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              height: 1,
-            ),
-          ),
-        ],
       ),
     );
   }

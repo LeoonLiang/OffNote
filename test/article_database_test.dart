@@ -26,6 +26,7 @@ void main() {
     int savedAt = 2000,
     List<String> imagePaths = const [],
     String remark = '',
+    String? categoryId,
   }) {
     return SavedArticle(
       id: id,
@@ -39,6 +40,7 @@ void main() {
       mediaType: mediaType,
       imagePaths: imagePaths,
       remark: remark,
+      categoryId: categoryId,
     );
   }
 
@@ -132,6 +134,42 @@ void main() {
 
     expect(firstPage.map((article) => article.id), ['new', 'middle']);
     expect(secondPage.map((article) => article.id), ['old']);
+  });
+
+  test(
+    'lists uncategorized articles by page ordered by publish time',
+    () async {
+      final db = await openTestDatabase(inMemoryDatabasePath);
+
+      await db.upsertArticle(
+        article(id: 'categorized', title: '分类', content: '', categoryId: 'c1'),
+      );
+      await db.upsertArticle(
+        article(id: 'old', title: '旧', content: '', publishedAt: 1000),
+      );
+      await db.upsertArticle(
+        article(id: 'new', title: '新', content: '', publishedAt: 3000),
+      );
+
+      final results = await db.listUncategorizedArticlesPage(limit: 10);
+
+      expect(results.map((article) => article.id), ['new', 'old']);
+    },
+  );
+
+  test('searches within a category', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(id: 'match', title: '咖啡', content: '', categoryId: 'food'),
+    );
+    await db.upsertArticle(
+      article(id: 'other', title: '咖啡', content: '', categoryId: 'travel'),
+    );
+
+    final results = await db.searchArticlesPage('咖啡', categoryId: 'food');
+
+    expect(results.map((article) => article.id), ['match']);
   });
 
   test('updates and searches article remarks', () async {

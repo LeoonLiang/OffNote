@@ -200,6 +200,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final sharedActions = [
+      IconButton(
+        onPressed: _openSaveQueue,
+        tooltip: '收录队列',
+        icon: Badge(
+          isLabelVisible: _saveQueue.activeCount > 0,
+          label: Text('${_saveQueue.activeCount}'),
+          child: const Icon(Icons.playlist_add_check_rounded),
+        ),
+      ),
+      IconButton(
+        onPressed: _openStorageStats,
+        tooltip: '使用统计',
+        icon: const Icon(Icons.query_stats_rounded),
+      ),
+    ];
     final pages = [
       ArticleListPage(
         key: ValueKey('home-$_refreshTick'),
@@ -207,22 +223,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         store: _store,
         onChanged: _refresh,
         searchable: true,
-        actions: [
-          IconButton(
-            onPressed: _openSaveQueue,
-            tooltip: '收录队列',
-            icon: Badge(
-              isLabelVisible: _saveQueue.activeCount > 0,
-              label: Text('${_saveQueue.activeCount}'),
-              child: const Icon(Icons.playlist_add_check_rounded),
-            ),
-          ),
-          IconButton(
-            onPressed: _openStorageStats,
-            tooltip: '使用统计',
-            icon: const Icon(Icons.query_stats_rounded),
-          ),
-        ],
+        actions: sharedActions,
+      ),
+      GalleryPage(
+        key: ValueKey('gallery-$_refreshTick'),
+        store: _store,
+        onChanged: _refresh,
+        actions: sharedActions,
       ),
       CategoryPage(
         key: ValueKey('category-$_refreshTick'),
@@ -233,19 +240,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openSaveDialog,
-        shape: const CircleBorder(),
-        backgroundColor: _accent,
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: _index == 0
+          ? FloatingActionButton(
+              onPressed: _openSaveDialog,
+              shape: const CircleBorder(),
+              backgroundColor: _accent,
+              foregroundColor: Colors.white,
+              child: const Icon(Icons.add),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: BottomAppBar(
         color: Colors.white,
         elevation: 12,
-        shape: const CircularNotchedRectangle(),
-        notchMargin: 8,
         child: SizedBox(
           height: 64,
           child: Row(
@@ -257,12 +264,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 label: '首页',
                 onTap: () => setState(() => _index = 0),
               ),
-              const SizedBox(width: 56),
               _NavItem(
                 selected: _index == 1,
+                icon: Icons.photo_library_rounded,
+                label: '画廊',
+                onTap: () => setState(() => _index = 1),
+              ),
+              _NavItem(
+                selected: _index == 2,
                 icon: Icons.folder_rounded,
                 label: '分类',
-                onTap: () => setState(() => _index = 1),
+                onTap: () => setState(() => _index = 2),
               ),
             ],
           ),

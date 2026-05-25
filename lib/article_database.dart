@@ -375,6 +375,21 @@ class ArticleDatabase {
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
 
+  Future<List<SavedArticle>> listUncategorizedArticlesPage({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final rows = await db.query(
+      'articles',
+      where: 'category_id IS NULL',
+      orderBy: 'published_at DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return rows.map(SavedArticle.fromMap).toList(growable: false);
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) async {
     return searchArticlesPage(query, limit: 100000);
   }
@@ -383,15 +398,34 @@ class ArticleDatabase {
     String query, {
     int limit = 20,
     int offset = 0,
+    String? categoryId,
+    bool uncategorizedOnly = false,
   }) async {
     final normalized = query.trim();
     if (normalized.isEmpty) {
+      if (categoryId != null) {
+        return listArticlesByCategoryPage(
+          categoryId,
+          limit: limit,
+          offset: offset,
+        );
+      }
+      if (uncategorizedOnly) {
+        return listUncategorizedArticlesPage(limit: limit, offset: offset);
+      }
       return listArticlesPage(limit: limit, offset: offset);
     }
 
     final db = await _db;
-    if (!_articleFtsAvailable) {
-      return _searchArticlesLike(db, normalized, limit: limit, offset: offset);
+    if (!_articleFtsAvailable || categoryId != null || uncategorizedOnly) {
+      return _searchArticlesLike(
+        db,
+        normalized,
+        limit: limit,
+        offset: offset,
+        categoryId: categoryId,
+        uncategorizedOnly: uncategorizedOnly,
+      );
     }
 
     final List<Map<String, Object?>> rows;
@@ -421,11 +455,21 @@ class ArticleDatabase {
     String query, {
     int limit = 20,
     int offset = 0,
+    String? categoryId,
+    bool uncategorizedOnly = false,
   }) async {
+    final clauses = ['(title LIKE ? OR content LIKE ? OR remark LIKE ?)'];
+    final args = <Object?>['%$query%', '%$query%', '%$query%'];
+    if (categoryId != null) {
+      clauses.add('category_id = ?');
+      args.add(categoryId);
+    } else if (uncategorizedOnly) {
+      clauses.add('category_id IS NULL');
+    }
     final rows = await db.query(
       'articles',
-      where: 'title LIKE ? OR content LIKE ? OR remark LIKE ?',
-      whereArgs: ['%$query%', '%$query%', '%$query%'],
+      where: clauses.join(' AND '),
+      whereArgs: args,
       orderBy: 'published_at DESC',
       limit: limit,
       offset: offset,

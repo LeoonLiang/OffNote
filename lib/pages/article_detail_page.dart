@@ -277,39 +277,83 @@ class _VideoArticleViewState extends State<_VideoArticleView> {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // 视频播放器拉满屏幕
-        OffNoteVideoPlayer(source: widget.source),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableHeight = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height;
+        final playerHeight = calculateVideoPlayerHeight(
+          availableHeight: availableHeight,
+          isContentExpanded: _isContentExpanded,
+        );
 
-        // 底部正文覆盖层
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: _ContentOverlay(
-            article: widget.article,
-            isExpanded: _isContentExpanded,
-            onExpandTap: () {
-              setState(() => _isContentExpanded = !_isContentExpanded);
-            },
-          ),
-        ),
-      ],
+        return Column(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              height: playerHeight,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  OffNoteVideoPlayer(source: widget.source),
+                  if (!_isContentExpanded)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 46,
+                      child: _CollapsedContentPreview(
+                        article: widget.article,
+                        onExpandTap: () {
+                          setState(() => _isContentExpanded = true);
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 240),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeOutCubic,
+                transitionBuilder: (child, animation) {
+                  final offset = Tween<Offset>(
+                    begin: const Offset(0, 1),
+                    end: Offset.zero,
+                  ).animate(animation);
+                  return SlideTransition(
+                    position: offset,
+                    child: FadeTransition(opacity: animation, child: child),
+                  );
+                },
+                child: _isContentExpanded
+                    ? _ExpandedContent(
+                        key: const ValueKey('expanded-video-content'),
+                        article: widget.article,
+                        onCollapse: () {
+                          setState(() => _isContentExpanded = false);
+                        },
+                      )
+                    : const SizedBox(
+                        key: ValueKey('collapsed-video-content-space'),
+                      ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
-class _ContentOverlay extends StatelessWidget {
-  const _ContentOverlay({
+class _CollapsedContentPreview extends StatelessWidget {
+  const _CollapsedContentPreview({
     required this.article,
-    required this.isExpanded,
     required this.onExpandTap,
   });
 
   final SavedArticle article;
-  final bool isExpanded;
   final VoidCallback onExpandTap;
 
   static TextSpan _buildTextWithTopics(String text, TextStyle baseStyle) {
@@ -325,10 +369,12 @@ class _ContentOverlay extends StatelessWidget {
 
       // 添加蓝色话题标签（去掉[话题]）
       final topic = match.group(1);
-      spans.add(TextSpan(
-        text: '#$topic#',
-        style: baseStyle.copyWith(color: const Color(0xff1E90FF)),
-      ));
+      spans.add(
+        TextSpan(
+          text: '#$topic#',
+          style: baseStyle.copyWith(color: const Color(0xff1E90FF)),
+        ),
+      );
 
       lastIndex = match.end;
     }
@@ -343,27 +389,11 @@ class _ContentOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isExpanded) {
-      return _ExpandedContent(
-        article: article,
-        onCollapse: onExpandTap,
-      );
-    }
-
     return GestureDetector(
       onTap: onExpandTap,
       child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.transparent,
-              Colors.black.withValues(alpha: 0.8),
-            ],
-          ),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 60, 16, 16),
+        color: Colors.transparent,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -381,13 +411,11 @@ class _ContentOverlay extends StatelessWidget {
                       fontSize: 15,
                       height: 1.4,
                       fontWeight: FontWeight.w700,
-                      shadows: [
-                        Shadow(color: Colors.black54, blurRadius: 4),
-                      ],
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
                     ),
                   ),
                   if (article.content.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     RichText(
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -409,17 +437,9 @@ class _ContentOverlay extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  width: 1,
-                ),
-              ),
-              child: const Row(
+            const DecoratedBox(
+              decoration: BoxDecoration(color: Colors.transparent),
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
@@ -448,6 +468,7 @@ class _ContentOverlay extends StatelessWidget {
 
 class _ExpandedContent extends StatelessWidget {
   const _ExpandedContent({
+    super.key,
     required this.article,
     required this.onCollapse,
   });
@@ -457,18 +478,20 @@ class _ExpandedContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.sizeOf(context).height * 0.7,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.92),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x22000000),
+            blurRadius: 16,
+            offset: Offset(0, -6),
+          ),
+        ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          // 拖动指示器和关闭按钮
           Container(
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
@@ -479,7 +502,7 @@ class _ExpandedContent extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.3),
+                    color: const Color(0xffd8d8d8),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -492,7 +515,7 @@ class _ExpandedContent extends StatelessWidget {
                       padding: const EdgeInsets.all(4),
                       child: const Icon(
                         Icons.keyboard_arrow_down_rounded,
-                        color: Colors.white70,
+                        color: _muted,
                         size: 24,
                       ),
                     ),
@@ -502,18 +525,17 @@ class _ExpandedContent extends StatelessWidget {
             ),
           ),
 
-          // 可滚动内容
-          Flexible(
+          Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   RichText(
-                    text: _ContentOverlay._buildTextWithTopics(
+                    text: _CollapsedContentPreview._buildTextWithTopics(
                       article.title,
                       const TextStyle(
-                        color: Colors.white,
+                        color: _ink,
                         fontSize: 18,
                         height: 1.4,
                         fontWeight: FontWeight.w700,
@@ -523,10 +545,10 @@ class _ExpandedContent extends StatelessWidget {
                   if (article.content.isNotEmpty) ...[
                     const SizedBox(height: 16),
                     RichText(
-                      text: _ContentOverlay._buildTextWithTopics(
+                      text: _CollapsedContentPreview._buildTextWithTopics(
                         article.content,
-                        TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
+                        const TextStyle(
+                          color: _ink,
                           fontSize: 15,
                           height: 1.6,
                           fontWeight: FontWeight.w400,

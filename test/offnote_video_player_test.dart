@@ -25,6 +25,29 @@ void main() {
     });
   });
 
+  group('video layout helpers', () {
+    test('opens video articles in autoplay mode', () {
+      expect(offNoteVideoAutoPlayOnOpen, isTrue);
+    });
+
+    test('compresses player height when content is expanded', () {
+      expect(
+        calculateVideoPlayerHeight(
+          availableHeight: 800,
+          isContentExpanded: false,
+        ),
+        800,
+      );
+      expect(
+        calculateVideoPlayerHeight(
+          availableHeight: 800,
+          isContentExpanded: true,
+        ),
+        424,
+      );
+    });
+  });
+
   group('OffNoteVideoSource', () {
     test('extracts local video and poster uris from offline html', () {
       final source = OffNoteVideoSource.fromHtml('''

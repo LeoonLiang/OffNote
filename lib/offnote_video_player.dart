@@ -5,6 +5,8 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+const offNoteVideoAutoPlayOnOpen = true;
+
 class OffNoteVideoSource {
   const OffNoteVideoSource({required this.videoUri, this.posterUri});
 
@@ -46,6 +48,16 @@ Size calculateContainedVideoSize({
   return Size(maxSize.height * aspectRatio, maxSize.height);
 }
 
+double calculateVideoPlayerHeight({
+  required double availableHeight,
+  required bool isContentExpanded,
+}) {
+  if (!isContentExpanded) {
+    return availableHeight;
+  }
+  return availableHeight * 0.53;
+}
+
 class OffNoteVideoPlayer extends StatefulWidget {
   const OffNoteVideoPlayer({super.key, required this.source});
 
@@ -59,47 +71,27 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
   late final Player _player;
   late final VideoController _controller;
   final _subscriptions = <StreamSubscription<Object?>>[];
-  int? _videoWidth;
-  int? _videoHeight;
   double _restoreRate = 1;
   bool _isFastForwarding = false;
   Duration? _seekStartPosition;
   double? _seekOffset;
-
-  double get _aspectRatio {
-    final width = _videoWidth;
-    final height = _videoHeight;
-    if (width != null && height != null && width > 0 && height > 0) {
-      return width / height;
-    }
-    return 9 / 16;
-  }
 
   @override
   void initState() {
     super.initState();
     _player = Player();
     _controller = VideoController(_player);
-    _videoWidth = _player.state.width;
-    _videoHeight = _player.state.height;
     _subscriptions.addAll([
-      _player.stream.width.listen((value) {
-        if (mounted) {
-          setState(() => _videoWidth = value);
-        }
-      }),
-      _player.stream.height.listen((value) {
-        if (mounted) {
-          setState(() => _videoHeight = value);
-        }
-      }),
       _player.stream.rate.listen((value) {
         if (!_isFastForwarding) {
           _restoreRate = value;
         }
       }),
     ]);
-    _player.open(Media(widget.source.videoUri), play: false);
+    _player.open(
+      Media(widget.source.videoUri),
+      play: offNoteVideoAutoPlayOnOpen,
+    );
   }
 
   @override
@@ -118,13 +110,7 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
         final maxHeight = constraints.maxHeight.isFinite
             ? constraints.maxHeight
             : MediaQuery.sizeOf(context).height;
-        final targetSize = calculateContainedVideoSize(
-          maxSize: Size(constraints.maxWidth, maxHeight),
-          aspectRatio: _aspectRatio,
-        );
-        final playerHeight = targetSize.height == 0
-            ? maxHeight
-            : targetSize.height;
+        final playerHeight = maxHeight;
 
         return SizedBox(
           width: double.infinity,
@@ -143,8 +129,12 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
                   controls: AdaptiveVideoControls,
                 ),
               ),
-              // 手势拦截层：只拦截水平拖拽和长按，点击穿透到视频控制栏
-              Positioned.fill(
+              // 手势层停在控制条上方，避免挡住底部进度条。
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                bottom: 56,
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onLongPressStart: (_) => _setFastForwarding(true),
@@ -163,11 +153,14 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
 
                     // 每移动 10px = 1 秒
                     final seekSeconds = (_seekOffset ?? 0) / 10;
-                    final newPosition = _seekStartPosition! + Duration(seconds: seekSeconds.round());
+                    final newPosition =
+                        _seekStartPosition! +
+                        Duration(seconds: seekSeconds.round());
                     final duration = _player.state.duration;
 
                     // 限制在有效范围内
-                    if (newPosition >= Duration.zero && newPosition <= duration) {
+                    if (newPosition >= Duration.zero &&
+                        newPosition <= duration) {
                       _player.seek(newPosition);
                     }
                   },
@@ -195,9 +188,7 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
                 Positioned(
                   top: 14,
                   left: 14,
-                  child: _SeekIndicator(
-                    offset: _seekOffset!,
-                  ),
+                  child: _SeekIndicator(offset: _seekOffset!),
                 ),
             ],
           ),

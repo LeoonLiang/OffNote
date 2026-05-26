@@ -5,12 +5,10 @@ class ArticleDetailPage extends StatefulWidget {
     super.key,
     required this.article,
     required this.store,
-    required this.onChanged,
   });
 
   final SavedArticle article;
   final ArticleSnapshotStore store;
-  final VoidCallback onChanged;
 
   @override
   State<ArticleDetailPage> createState() => _ArticleDetailPageState();
@@ -22,6 +20,7 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   late final WebViewController _controller;
   late final Future<OffNoteVideoSource?> _videoSourceFuture;
   late SavedArticle _article = widget.article;
+  bool _hasListChanges = false;
 
   @override
   void initState() {
@@ -44,27 +43,44 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       onRemarkTap: _editRemark,
       onCategoryTap: _chooseCategory,
     );
-    return Scaffold(
-      appBar: AppBar(title: Text(_article.title, maxLines: 1)),
-      body: SafeArea(
-        child: _article.mediaType == ArticleMediaType.video
-            ? Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned(left: 0, right: 0, bottom: 0, child: actionBar),
-                  Positioned.fill(
-                    bottom: _videoActionBarHeight,
-                    child: _buildArticleBody(),
-                  ),
-                ],
-              )
-            : Column(
-                children: [
-                  Expanded(child: _buildArticleBody()),
-                  actionBar,
-                ],
-              ),
+    return PopScope<ArticleDetailResult>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          return;
+        }
+        _closeDetail();
+      },
+      child: Scaffold(
+        appBar: AppBar(title: Text(_article.title, maxLines: 1)),
+        body: SafeArea(
+          child: _article.mediaType == ArticleMediaType.video
+              ? Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(left: 0, right: 0, bottom: 0, child: actionBar),
+                    Positioned.fill(
+                      bottom: _videoActionBarHeight,
+                      child: _buildArticleBody(),
+                    ),
+                  ],
+                )
+              : Column(
+                  children: [
+                    Expanded(child: _buildArticleBody()),
+                    actionBar,
+                  ],
+                ),
+        ),
       ),
+    );
+  }
+
+  void _closeDetail() {
+    Navigator.of(context).pop(
+      _hasListChanges
+          ? ArticleDetailResult.changed
+          : ArticleDetailResult.unchanged,
     );
   }
 
@@ -147,8 +163,10 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       return;
     }
     await widget.store.assignArticleCategory(_article.id, categoryId);
-    setState(() => _article = _article.copyWith(categoryId: categoryId));
-    widget.onChanged();
+    setState(() {
+      _article = _article.copyWith(categoryId: categoryId);
+      _hasListChanges = true;
+    });
   }
 
   Future<void> _openOriginalUrl() async {
@@ -171,8 +189,10 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     if (!mounted) {
       return;
     }
-    setState(() => _article = _article.copyWith(isStarred: next));
-    widget.onChanged();
+    setState(() {
+      _article = _article.copyWith(isStarred: next);
+      _hasListChanges = true;
+    });
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(next ? '已星标' : '已取消星标')));
@@ -213,8 +233,10 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       return;
     }
     await widget.store.updateArticleRemark(_article.id, remark);
-    setState(() => _article = _article.copyWith(remark: remark));
-    widget.onChanged();
+    setState(() {
+      _article = _article.copyWith(remark: remark);
+      _hasListChanges = true;
+    });
   }
 }
 

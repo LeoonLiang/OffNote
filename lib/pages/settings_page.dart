@@ -166,51 +166,18 @@ class _SettingsPageState extends State<SettingsPage> {
     GithubRelease release,
     GithubReleaseAsset? apk,
   ) {
-    return showDialog<void>(
+    return showAppUpdateDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(release.name.isEmpty ? release.tagName : release.name),
-        content: SingleChildScrollView(
-          child: Text(
-            [
-              if (release.body.trim().isNotEmpty) release.body.trim(),
-              if (apk == null) '没有在这个 Release 里找到 APK 安装包。',
-            ].join('\n\n'),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('稍后'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _launchExternal(release.htmlUrl);
-            },
-            child: const Text('Release 页面'),
-          ),
-          if (apk != null) ...[
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _downloadAndInstall(apk, apk.downloadUrl);
-              },
-              child: const Text('GitHub 下载'),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _downloadAndInstall(
-                  apk,
-                  acceleratedDownloadUrl(apk.downloadUrl),
-                );
-              },
-              child: const Text('加速下载'),
-            ),
-          ],
-        ],
-      ),
+      release: release,
+      apk: apk,
+      onOpenRelease: () => _launchExternal(release.htmlUrl),
+      onDownload: (downloadUrl) {
+        final asset = apk;
+        if (asset == null) {
+          return;
+        }
+        _downloadAndInstall(asset, downloadUrl);
+      },
     );
   }
 

@@ -263,6 +263,8 @@ class _PreviewImage extends StatelessWidget {
             Image.file(
               File(path),
               fit: BoxFit.cover,
+              cacheWidth: 216,
+              cacheHeight: 216,
               errorBuilder: (_, _, _) => const ColoredBox(
                 color: _accentSoft,
                 child: Icon(Icons.broken_image_outlined, color: _accent),

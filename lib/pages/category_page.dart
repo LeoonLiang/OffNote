@@ -1,10 +1,16 @@
 part of '../main.dart';
 
 class CategoryPage extends StatefulWidget {
-  const CategoryPage({super.key, required this.store, required this.onChanged});
+  const CategoryPage({
+    super.key,
+    required this.store,
+    required this.onChanged,
+    this.refreshToken = 0,
+  });
 
   final ArticleSnapshotStore store;
   final VoidCallback onChanged;
+  final int refreshToken;
 
   @override
   State<CategoryPage> createState() => _CategoryPageState();
@@ -17,6 +23,14 @@ class _CategoryPageState extends State<CategoryPage> {
   void initState() {
     super.initState();
     _future = widget.store.listCategories();
+  }
+
+  @override
+  void didUpdateWidget(covariant CategoryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshToken != oldWidget.refreshToken) {
+      _future = widget.store.listCategories();
+    }
   }
 
   Future<void> _refresh() async {

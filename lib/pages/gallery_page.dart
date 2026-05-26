@@ -43,11 +43,13 @@ class GalleryPage extends StatefulWidget {
     required this.store,
     required this.onChanged,
     this.actions = const [],
+    this.refreshToken = 0,
   });
 
   final ArticleSnapshotStore store;
   final VoidCallback onChanged;
   final List<Widget> actions;
+  final int refreshToken;
 
   @override
   State<GalleryPage> createState() => _GalleryPageState();
@@ -70,6 +72,14 @@ class _GalleryPageState extends State<GalleryPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadFirstPage();
+  }
+
+  @override
+  void didUpdateWidget(covariant GalleryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshToken != oldWidget.refreshToken) {
+      _loadFirstPage();
+    }
   }
 
   @override
@@ -265,6 +275,9 @@ class _GalleryPageState extends State<GalleryPage> {
                   : RefreshIndicator(
                       onRefresh: _refresh,
                       child: CustomScrollView(
+                        key: const PageStorageKey<String>(
+                          'offnote-gallery-scroll',
+                        ),
                         controller: _scrollController,
                         slivers: [
                           SliverPadding(
@@ -296,19 +309,18 @@ class _GalleryPageState extends State<GalleryPage> {
   }
 
   Future<void> _openArticle(SavedArticle article) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final result = await Navigator.of(context).push<ArticleDetailResult>(
+      MaterialPageRoute<ArticleDetailResult>(
         builder: (_) => ArticleDetailPage(
           article: article,
           store: widget.store,
-          onChanged: () {
-            widget.onChanged();
-            _refresh();
-          },
         ),
       ),
     );
-    await _refresh();
+    if (!result.needsListRefresh) {
+      return;
+    }
+    widget.onChanged();
   }
 }
 
@@ -339,6 +351,9 @@ class _MasonryGalleryGrid extends StatelessWidget {
                 children: [
                   for (final item in columns[columnIndex]) ...[
                     _GalleryTile(
+                      key: ValueKey(
+                        'gallery-${item.article.id}-${item.mediaIndex}-${item.mediaPath}',
+                      ),
                       item: item,
                       height: _estimatedHeightForItem(item),
                       onTap: () => onTap(item.article),
@@ -369,6 +384,7 @@ class _MasonryGalleryGrid extends StatelessWidget {
 
 class _GalleryTile extends StatelessWidget {
   const _GalleryTile({
+    super.key,
     required this.item,
     required this.height,
     required this.onTap,
@@ -380,6 +396,7 @@ class _GalleryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Material(
@@ -395,6 +412,11 @@ class _GalleryTile extends StatelessWidget {
                 Image.file(
                   File(item.mediaPath),
                   fit: BoxFit.cover,
+                  cacheWidth: galleryPreviewCacheWidth(
+                    180,
+                    devicePixelRatio: devicePixelRatio,
+                  ),
+                  gaplessPlayback: true,
                   errorBuilder: (_, _, _) => const ColoredBox(
                     color: _accentSoft,
                     child: Center(

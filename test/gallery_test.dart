@@ -108,4 +108,9 @@ void main() {
       '/tmp/3.jpg',
     ]);
   });
+
+  test('calculates gallery preview cache width without constraining height', () {
+    expect(galleryPreviewCacheWidth(180, devicePixelRatio: 2), 360);
+    expect(galleryPreviewCacheWidth(180, devicePixelRatio: 3), 540);
+  });
 }

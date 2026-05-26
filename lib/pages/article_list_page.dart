@@ -9,6 +9,7 @@ class ArticleListPage extends StatefulWidget {
     this.category,
     this.searchable = false,
     this.actions = const [],
+    this.refreshToken = 0,
   });
 
   final String title;
@@ -17,6 +18,7 @@ class ArticleListPage extends StatefulWidget {
   final VoidCallback onChanged;
   final bool searchable;
   final List<Widget> actions;
+  final int refreshToken;
 
   @override
   State<ArticleListPage> createState() => _ArticleListPageState();
@@ -45,6 +47,14 @@ class _ArticleListPageState extends State<ArticleListPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadFirstPage();
+  }
+
+  @override
+  void didUpdateWidget(covariant ArticleListPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshToken != oldWidget.refreshToken) {
+      _loadFirstPage();
+    }
   }
 
   @override
@@ -373,19 +383,21 @@ class _ArticleListPageState extends State<ArticleListPage> {
   }
 
   Future<void> _openArticle(SavedArticle article) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    final result = await Navigator.of(context).push<ArticleDetailResult>(
+      MaterialPageRoute<ArticleDetailResult>(
         builder: (_) => ArticleDetailPage(
           article: article,
           store: widget.store,
-          onChanged: () {
-            widget.onChanged();
-            _refresh();
-          },
         ),
       ),
     );
-    await _refresh();
+    if (!result.needsListRefresh) {
+      return;
+    }
+    widget.onChanged();
+    if (widget.category != null) {
+      await _refresh();
+    }
   }
 
   Future<void> _confirmDelete(SavedArticle article) async {

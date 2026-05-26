@@ -81,3 +81,10 @@ List<List<GalleryItem>> distributeGalleryItems(
   }
   return columns;
 }
+
+int galleryPreviewCacheWidth(
+  double displayWidth, {
+  required double devicePixelRatio,
+}) {
+  return (displayWidth * devicePixelRatio).round().clamp(1, 4096);
+}

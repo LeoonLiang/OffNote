@@ -186,16 +186,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openArticle(SavedArticle article) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ArticleDetailPage(
-          article: article,
-          store: _store,
-          onChanged: _refresh,
-        ),
+    final result = await Navigator.of(context).push<ArticleDetailResult>(
+      MaterialPageRoute<ArticleDetailResult>(
+        builder: (_) => ArticleDetailPage(article: article, store: _store),
       ),
     );
-    _refresh();
+    if (result.needsListRefresh) {
+      _refresh();
+    }
   }
 
   @override
@@ -213,26 +211,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ];
     final pages = [
       ArticleListPage(
-        key: ValueKey('home-$_refreshTick'),
         title: '全部文章',
         store: _store,
         onChanged: _refresh,
         searchable: true,
         actions: sharedActions,
+        refreshToken: _refreshTick,
       ),
       GalleryPage(
-        key: ValueKey('gallery-$_refreshTick'),
         store: _store,
         onChanged: _refresh,
         actions: sharedActions,
+        refreshToken: _refreshTick,
       ),
       CategoryPage(
-        key: ValueKey('category-$_refreshTick'),
         store: _store,
         onChanged: _refresh,
+        refreshToken: _refreshTick,
       ),
       SettingsPage(
-        key: ValueKey('settings-$_refreshTick'),
         store: _store,
         queue: _saveQueue,
         onChanged: _refresh,

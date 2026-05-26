@@ -52,6 +52,74 @@ void main() {
     ]);
   });
 
+  test('extracts comments and nested replies from initial state', () {
+    const html = r'''
+    <html>
+      <body>
+        <script>
+          window.__INITIAL_STATE__={
+            "note":{"noteDetailMap":{"688c":{"note":{
+              "title":"格木村，让我来帮你宣传好了！",
+              "desc":"徒步格聂扎营格木村",
+              "user":{"nickName":"蓝蓝"},
+              "imageList":[{"url":"http:\/\/sns-webpic-qc.xhscdn.com\/a.jpg"}]
+            }}}},
+            "commentsData":{
+              "commentCount":57,
+              "comments":[
+                {
+                  "id":"c1",
+                  "content":"国庆去不知道还好看吗？",
+                  "time":1754045599000,
+                  "ipLocation":"河南",
+                  "likeCount":3,
+                  "user":{"nickname":"墩墩","image":"https:\/\/sns-avatar-qc.xhscdn.com\/avatar\/u.jpg"},
+                  "pictures":[
+                    {"url":"http:\/\/sns-na-i6.xhscdn.com\/comment\/p.jpg?imageView2\/2\/h\/360\/format\/webp&origin=0"}
+                  ],
+                  "subComments":[
+                    {
+                      "id":"r1",
+                      "content":"花期就那么一个多月",
+                      "time":1756274090000,
+                      "ipLocation":"河南",
+                      "user":{"nickname":"蓝蓝"}
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        </script>
+      </body>
+    </html>
+    ''';
+
+    final snapshot = parseXhsNoteSnapshot(
+      html: html,
+      sourceUrl: 'https://www.xiaohongshu.com/discovery/item/demo',
+    );
+
+    expect(snapshot, isNotNull);
+    expect(snapshot!.commentCount, 57);
+    expect(snapshot.comments, hasLength(2));
+    expect(snapshot.comments.first.authorName, '墩墩');
+    expect(snapshot.comments.first.content, '国庆去不知道还好看吗？');
+    expect(snapshot.comments.first.ipLocation, '河南');
+    expect(snapshot.comments.first.likeCount, 3);
+    expect(snapshot.comments.first.depth, 0);
+    expect(snapshot.comments.first.imageUrls, [
+      'https://sns-na-i6.xhscdn.com/comment/p.jpg?imageView2/2/h/360/format/webp&origin=0',
+    ]);
+    expect(snapshot.comments.last.authorName, '蓝蓝');
+    expect(snapshot.comments.last.content, '花期就那么一个多月');
+    expect(snapshot.comments.last.depth, 1);
+    expect(
+      snapshot.comments.last.publishedAt,
+      DateTime.fromMillisecondsSinceEpoch(1756274090000),
+    );
+  });
+
   test('prefers rendered carousel images and excludes avatars', () {
     const html = '''
     <html>

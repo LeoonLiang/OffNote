@@ -56,15 +56,30 @@ class _ArticleTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      article.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: _ink,
-                        height: 1.25,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            article.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: _ink,
+                              height: 1.25,
+                            ),
+                          ),
+                        ),
+                        if (article.isStarred) ...[
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.star_rounded,
+                            size: 17,
+                            color: Color(0xffffb300),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Text(

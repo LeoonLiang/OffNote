@@ -27,6 +27,7 @@ void main() {
     List<String> imagePaths = const [],
     String remark = '',
     String? categoryId,
+    bool isStarred = false,
   }) {
     return SavedArticle(
       id: id,
@@ -35,12 +36,14 @@ void main() {
       htmlPath: '/tmp/$id/index.html',
       coverPath: null,
       sourceUrl: 'https://example.com/$id',
+      originalUrl: 'https://xhslink.com/$id',
       publishedAt: DateTime.fromMillisecondsSinceEpoch(publishedAt),
       savedAt: DateTime.fromMillisecondsSinceEpoch(savedAt),
       mediaType: mediaType,
       imagePaths: imagePaths,
       remark: remark,
       categoryId: categoryId,
+      isStarred: isStarred,
     );
   }
 
@@ -116,6 +119,36 @@ void main() {
     expect(saved.remark, '下次复盘用');
   });
 
+  test('persists the original copied url separately from source url', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(article(id: 'a1', title: '图文笔记', content: '正文'));
+
+    final saved = (await db.listArticles()).single;
+    expect(saved.sourceUrl, 'https://example.com/a1');
+    expect(saved.originalUrl, 'https://xhslink.com/a1');
+  });
+
+  test('persists and filters starred articles', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(id: 'starred', title: '星标', content: '', isStarred: true),
+    );
+    await db.upsertArticle(article(id: 'normal', title: '普通', content: ''));
+
+    expect((await db.listStarredArticlesPage()).map((article) => article.id), [
+      'starred',
+    ]);
+
+    await db.updateArticleStarred('normal', true);
+    await db.updateArticleStarred('starred', false);
+
+    expect((await db.listStarredArticlesPage()).map((article) => article.id), [
+      'normal',
+    ]);
+  });
+
   test('lists articles by page ordered by publish time', () async {
     final db = await openTestDatabase(inMemoryDatabasePath);
 
@@ -168,6 +201,19 @@ void main() {
     );
 
     final results = await db.searchArticlesPage('咖啡', categoryId: 'food');
+
+    expect(results.map((article) => article.id), ['match']);
+  });
+
+  test('searches within starred articles', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(id: 'match', title: '咖啡', content: '', isStarred: true),
+    );
+    await db.upsertArticle(article(id: 'other', title: '咖啡', content: ''));
+
+    final results = await db.searchArticlesPage('咖啡', starredOnly: true);
 
     expect(results.map((article) => article.id), ['match']);
   });
@@ -416,6 +462,129 @@ void main() {
       expect(article.id, 'old-article');
       // This tests that created_at was migrated to publishedAt
       expect(article.publishedAt.millisecondsSinceEpoch, 1640000000000);
+    },
+  );
+
+  test('migrates a v6 database to v7 and backfills original url', () async {
+    final path = await databaseFactory.getDatabasesPath();
+    final dbPath = '$path/offnote-v6-to-v7-migration-test.db';
+    await databaseFactory.deleteDatabase(dbPath);
+
+    final legacyDb = await databaseFactory.openDatabase(
+      dbPath,
+      options: OpenDatabaseOptions(
+        version: 6,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE articles (
+              id TEXT PRIMARY KEY,
+              title TEXT,
+              content TEXT,
+              html_path TEXT,
+              cover_path TEXT,
+              source_url TEXT,
+              published_at INTEGER,
+              saved_at INTEGER,
+              media_type TEXT NOT NULL DEFAULT 'image',
+              category_id TEXT,
+              image_paths TEXT,
+              remark TEXT NOT NULL DEFAULT ''
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE categories (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              color INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+          await db.insert('articles', {
+            'id': 'old-article',
+            'title': 'V6旧文章',
+            'content': '迁移测试内容',
+            'html_path': '/tmp/old/index.html',
+            'cover_path': null,
+            'source_url': 'https://www.xiaohongshu.com/discovery/item/old',
+            'published_at': 1640000000000,
+            'saved_at': 1640000001000,
+            'media_type': 'image',
+            'category_id': null,
+            'image_paths': '[]',
+            'remark': '',
+          });
+        },
+      ),
+    );
+    await legacyDb.close();
+
+    final migratedDb = await openTestDatabase(dbPath);
+    final article = (await migratedDb.listArticles()).single;
+
+    expect(article.originalUrl, article.sourceUrl);
+  });
+
+  test(
+    'migrates a v7 database to v8 and defaults articles to unstarred',
+    () async {
+      final path = await databaseFactory.getDatabasesPath();
+      final dbPath = '$path/offnote-v7-to-v8-migration-test.db';
+      await databaseFactory.deleteDatabase(dbPath);
+
+      final legacyDb = await databaseFactory.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 7,
+          onCreate: (db, version) async {
+            await db.execute('''
+            CREATE TABLE articles (
+              id TEXT PRIMARY KEY,
+              title TEXT,
+              content TEXT,
+              html_path TEXT,
+              cover_path TEXT,
+              source_url TEXT,
+              original_url TEXT,
+              published_at INTEGER,
+              saved_at INTEGER,
+              media_type TEXT NOT NULL DEFAULT 'image',
+              category_id TEXT,
+              image_paths TEXT,
+              remark TEXT NOT NULL DEFAULT ''
+            )
+          ''');
+            await db.execute('''
+            CREATE TABLE categories (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              color INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+            await db.insert('articles', {
+              'id': 'old-article',
+              'title': 'V7旧文章',
+              'content': '迁移测试内容',
+              'html_path': '/tmp/old/index.html',
+              'cover_path': null,
+              'source_url': 'https://example.com/old',
+              'original_url': 'https://xhslink.com/old',
+              'published_at': 1640000000000,
+              'saved_at': 1640000001000,
+              'media_type': 'image',
+              'category_id': null,
+              'image_paths': '[]',
+              'remark': '',
+            });
+          },
+        ),
+      );
+      await legacyDb.close();
+
+      final migratedDb = await openTestDatabase(dbPath);
+      final article = (await migratedDb.listArticles()).single;
+
+      expect(article.isStarred, isFalse);
     },
   );
 }

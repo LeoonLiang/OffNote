@@ -10,6 +10,8 @@ class XhsNoteSnapshot {
     required this.title,
     required this.content,
     required this.imageUrls,
+    this.comments = const [],
+    this.commentCount,
     this.videoUrl,
     this.posterUrl,
     this.authorName,
@@ -20,6 +22,8 @@ class XhsNoteSnapshot {
   final String title;
   final String content;
   final List<String> imageUrls;
+  final List<ArticleComment> comments;
+  final int? commentCount;
   final String? videoUrl;
   final String? posterUrl;
   final String? authorName;
@@ -67,6 +71,8 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
   final publishedAt =
       _extractPublishTimeFromNote(note) ??
       extractPublishTimeFromHtml(html, sourceUrl);
+  final commentsData = _findCommentsMap(state);
+  final comments = _extractComments(commentsData, sourceUrl);
 
   if (title == null ||
       content == null ||
@@ -78,6 +84,8 @@ XhsNoteSnapshot? parseXhsNoteSnapshot({
     title: title,
     content: content,
     imageUrls: imageUrls,
+    comments: comments,
+    commentCount: _intValueOrNull(commentsData?['commentCount']),
     videoUrl: videoUrl,
     posterUrl: posterUrl,
     authorName: authorName,
@@ -136,6 +144,8 @@ XhsNoteSnapshot? _parseRenderedNoteSnapshot({
   final publishedAt =
       (jsonNote == null ? null : _extractPublishTimeFromNote(jsonNote)) ??
       extractPublishTimeFromHtml(html, sourceUrl);
+  final commentsData = jsonState == null ? null : _findCommentsMap(jsonState);
+  final comments = _extractComments(commentsData, sourceUrl);
 
   if (title == null || content == null || imageUrls.isEmpty) {
     return null;
@@ -145,10 +155,129 @@ XhsNoteSnapshot? _parseRenderedNoteSnapshot({
     title: title,
     content: content,
     imageUrls: imageUrls.toList(growable: false),
+    comments: comments,
+    commentCount: _intValueOrNull(commentsData?['commentCount']),
     authorName: authorName,
     authorAvatarUrl: authorAvatar.isEmpty ? null : authorAvatar,
     publishedAt: publishedAt,
   );
+}
+
+Map<dynamic, dynamic>? _findCommentsMap(Object? value) {
+  if (value is Map) {
+    if (value['comments'] is List &&
+        (value.containsKey('commentCount') ||
+            value.containsKey('commentCountL1') ||
+            value.containsKey('hasMore'))) {
+      return value;
+    }
+
+    for (final child in value.values) {
+      final comments = _findCommentsMap(child);
+      if (comments != null) {
+        return comments;
+      }
+    }
+  }
+
+  if (value is List) {
+    for (final child in value) {
+      final comments = _findCommentsMap(child);
+      if (comments != null) {
+        return comments;
+      }
+    }
+  }
+
+  return null;
+}
+
+List<ArticleComment> _extractComments(
+  Map<dynamic, dynamic>? commentsData,
+  String sourceUrl,
+) {
+  final rawComments = commentsData?['comments'];
+  if (rawComments is! List) {
+    return const [];
+  }
+
+  final comments = <ArticleComment>[];
+  for (final rawComment in rawComments) {
+    if (rawComment is! Map) {
+      continue;
+    }
+    _appendComment(comments, rawComment, sourceUrl, depth: 0);
+  }
+  return comments.toList(growable: false);
+}
+
+void _appendComment(
+  List<ArticleComment> comments,
+  Map<dynamic, dynamic> rawComment,
+  String sourceUrl, {
+  required int depth,
+}) {
+  final content = _contentStringValue(rawComment['content']);
+  if (content == null) {
+    return;
+  }
+
+  final user = rawComment['user'] is Map ? rawComment['user'] as Map : null;
+  final avatarUrl = normalizeResourceUrl(
+    _stringValue(user?['image']) ?? _stringValue(user?['avatar']) ?? '',
+    sourceUrl,
+  );
+  comments.add(
+    ArticleComment(
+      authorName:
+          _stringValue(user?['nickname']) ??
+          _stringValue(user?['nickName']) ??
+          _stringValue(user?['name']) ??
+          '小红书用户',
+      content: content,
+      authorAvatarUrl: avatarUrl.isEmpty ? null : avatarUrl,
+      publishedAt: parsePublishTimeValue(rawComment['time']),
+      ipLocation: _stringValue(rawComment['ipLocation']),
+      likeCount: _intValue(rawComment['likeCount']),
+      depth: depth,
+      imageUrls: _extractCommentImageUrls(rawComment, sourceUrl),
+    ),
+  );
+
+  final subComments = rawComment['subComments'];
+  if (subComments is! List) {
+    return;
+  }
+  for (final subComment in subComments) {
+    if (subComment is Map) {
+      _appendComment(comments, subComment, sourceUrl, depth: depth + 1);
+    }
+  }
+}
+
+List<String> _extractCommentImageUrls(
+  Map<dynamic, dynamic> rawComment,
+  String sourceUrl,
+) {
+  final pictures = rawComment['pictures'];
+  if (pictures is! List) {
+    return const [];
+  }
+
+  final urls = <String>{};
+  for (final picture in pictures) {
+    if (picture is! Map) {
+      continue;
+    }
+    final normalized = normalizeResourceUrl(
+      _stringValue(picture['url']) ?? _stringValue(picture['originUrl']) ?? '',
+      sourceUrl,
+    );
+    if (normalized.isNotEmpty) {
+      urls.add(normalized);
+    }
+  }
+  return urls.toList(growable: false);
 }
 
 DateTime? _extractPublishTimeFromNote(Map<dynamic, dynamic> note) {
@@ -347,6 +476,19 @@ int _intValue(Object? value) {
     return int.tryParse(value) ?? 0;
   }
   return 0;
+}
+
+int? _intValueOrNull(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  if (value is String) {
+    return int.tryParse(value);
+  }
+  return null;
 }
 
 // Like _stringValue but preserves newlines — used for note body text.

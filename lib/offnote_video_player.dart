@@ -120,13 +120,38 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
             children: [
               ColoredBox(
                 color: Colors.black,
-                child: Video(
-                  controller: _controller,
-                  width: double.infinity,
-                  height: playerHeight,
-                  fit: BoxFit.contain,
-                  fill: Colors.black,
-                  controls: AdaptiveVideoControls,
+                child: MaterialVideoControlsTheme(
+                  normal: kDefaultMaterialVideoControlsThemeData.copyWith(
+                    visibleOnMount: true,
+                    controlsHoverDuration: const Duration(days: 365),
+                    controlsTransitionDuration: Duration.zero,
+                    backdropColor: Colors.transparent,
+                    seekBarAlignment: Alignment.bottomCenter,
+                    seekBarColor: const Color(0x55ffffff),
+                    seekBarBufferColor: const Color(0x66ffffff),
+                    seekBarPositionColor: Colors.white,
+                    seekBarThumbColor: Colors.white,
+                  ),
+                  fullscreen: kDefaultMaterialVideoControlsThemeDataFullscreen
+                      .copyWith(
+                        visibleOnMount: true,
+                        controlsHoverDuration: const Duration(days: 365),
+                        controlsTransitionDuration: Duration.zero,
+                        backdropColor: Colors.transparent,
+                        seekBarAlignment: Alignment.bottomCenter,
+                        seekBarColor: const Color(0x55ffffff),
+                        seekBarBufferColor: const Color(0x66ffffff),
+                        seekBarPositionColor: Colors.white,
+                        seekBarThumbColor: Colors.white,
+                      ),
+                  child: Video(
+                    controller: _controller,
+                    width: double.infinity,
+                    height: playerHeight,
+                    fit: BoxFit.contain,
+                    fill: Colors.black,
+                    controls: AdaptiveVideoControls,
+                  ),
                 ),
               ),
               // 手势层停在控制条上方，避免挡住底部进度条。

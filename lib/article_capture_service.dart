@@ -32,6 +32,7 @@ class ArticleCaptureService {
     return _store.save(
       rawHtml: html,
       sourceUrl: sourceUrl,
+      originalUrl: url,
       allowPartialMedia: allowPartialMedia,
     );
   }

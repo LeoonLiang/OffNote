@@ -32,7 +32,7 @@ class ArticleDatabase {
     final database = await (_databaseFactory ?? databaseFactory).openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 8,
         onCreate: (db, version) async {
           await _createSchema(db);
           await _tryCreateArticleFtsSchema(db);
@@ -70,6 +70,12 @@ class ArticleDatabase {
           if (oldVersion < 6) {
             await _migrateToSavedAtAndRemark(db);
           }
+          if (oldVersion < 7) {
+            await _migrateToOriginalUrl(db);
+          }
+          if (oldVersion < 8) {
+            await _migrateToStarred(db);
+          }
         },
       ),
     );
@@ -92,9 +98,11 @@ class ArticleDatabase {
         html_path TEXT,
         cover_path TEXT,
         source_url TEXT,
+        original_url TEXT,
         published_at INTEGER,
         saved_at INTEGER,
         media_type TEXT NOT NULL DEFAULT 'image',
+        is_starred INTEGER NOT NULL DEFAULT 0,
         category_id TEXT,
         image_paths TEXT,
         remark TEXT NOT NULL DEFAULT ''
@@ -211,9 +219,11 @@ class ArticleDatabase {
         html_path TEXT,
         cover_path TEXT,
         source_url TEXT,
+        original_url TEXT,
         published_at INTEGER,
         saved_at INTEGER,
         media_type TEXT NOT NULL DEFAULT 'image',
+        is_starred INTEGER NOT NULL DEFAULT 0,
         category_id TEXT,
         image_paths TEXT,
         remark TEXT NOT NULL DEFAULT ''
@@ -223,12 +233,12 @@ class ArticleDatabase {
     // Copy data to new table
     await db.execute('''
       INSERT INTO articles_new (
-        id, title, content, html_path, cover_path, source_url,
-        published_at, saved_at, media_type, category_id, image_paths, remark
+        id, title, content, html_path, cover_path, source_url, original_url,
+        published_at, saved_at, media_type, is_starred, category_id, image_paths, remark
       )
       SELECT
-        id, title, content, html_path, cover_path, source_url,
-        published_at, created_at, media_type, category_id, image_paths, ''
+        id, title, content, html_path, cover_path, source_url, source_url,
+        published_at, created_at, media_type, 0, category_id, image_paths, ''
       FROM articles
     ''');
 
@@ -264,6 +274,22 @@ class ArticleDatabase {
     if (ftsCreated) {
       await _rebuildArticleFts(db);
     }
+  }
+
+  Future<void> _migrateToOriginalUrl(DatabaseExecutor db) async {
+    await _addColumnIfMissing(db, 'articles', 'original_url', 'TEXT');
+    await db.execute(
+      'UPDATE articles SET original_url = COALESCE(NULLIF(original_url, \'\'), source_url)',
+    );
+  }
+
+  Future<void> _migrateToStarred(DatabaseExecutor db) async {
+    await _addColumnIfMissing(
+      db,
+      'articles',
+      'is_starred',
+      'INTEGER NOT NULL DEFAULT 0',
+    );
   }
 
   Future<void> _addColumnIfMissing(
@@ -390,6 +416,21 @@ class ArticleDatabase {
     return rows.map(SavedArticle.fromMap).toList(growable: false);
   }
 
+  Future<List<SavedArticle>> listStarredArticlesPage({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final rows = await db.query(
+      'articles',
+      where: 'is_starred = 1',
+      orderBy: 'published_at DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return rows.map(SavedArticle.fromMap).toList(growable: false);
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) async {
     return searchArticlesPage(query, limit: 100000);
   }
@@ -400,9 +441,13 @@ class ArticleDatabase {
     int offset = 0,
     String? categoryId,
     bool uncategorizedOnly = false,
+    bool starredOnly = false,
   }) async {
     final normalized = query.trim();
     if (normalized.isEmpty) {
+      if (starredOnly) {
+        return listStarredArticlesPage(limit: limit, offset: offset);
+      }
       if (categoryId != null) {
         return listArticlesByCategoryPage(
           categoryId,
@@ -417,7 +462,10 @@ class ArticleDatabase {
     }
 
     final db = await _db;
-    if (!_articleFtsAvailable || categoryId != null || uncategorizedOnly) {
+    if (!_articleFtsAvailable ||
+        categoryId != null ||
+        uncategorizedOnly ||
+        starredOnly) {
       return _searchArticlesLike(
         db,
         normalized,
@@ -425,6 +473,7 @@ class ArticleDatabase {
         offset: offset,
         categoryId: categoryId,
         uncategorizedOnly: uncategorizedOnly,
+        starredOnly: starredOnly,
       );
     }
 
@@ -457,6 +506,7 @@ class ArticleDatabase {
     int offset = 0,
     String? categoryId,
     bool uncategorizedOnly = false,
+    bool starredOnly = false,
   }) async {
     final clauses = ['(title LIKE ? OR content LIKE ? OR remark LIKE ?)'];
     final args = <Object?>['%$query%', '%$query%', '%$query%'];
@@ -465,6 +515,9 @@ class ArticleDatabase {
       args.add(categoryId);
     } else if (uncategorizedOnly) {
       clauses.add('category_id IS NULL');
+    }
+    if (starredOnly) {
+      clauses.add('is_starred = 1');
     }
     final rows = await db.query(
       'articles',
@@ -506,6 +559,16 @@ class ArticleDatabase {
         }
       }
     });
+  }
+
+  Future<void> updateArticleStarred(String articleId, bool isStarred) async {
+    final db = await _db;
+    await db.update(
+      'articles',
+      {'is_starred': isStarred ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [articleId],
+    );
   }
 
   Future<void> updateArticleRemark(String articleId, String remark) async {

@@ -76,6 +76,13 @@ class _ArticleListPageState extends State<ArticleListPage> {
             ? filter.category!.id
             : null,
         uncategorizedOnly: filter.kind == _GalleryFilterKind.uncategorized,
+        starredOnly: filter.kind == _GalleryFilterKind.starred,
+      );
+    }
+    if (filter.kind == _GalleryFilterKind.starred) {
+      return widget.store.listStarredArticlesPage(
+        limit: _pageSize,
+        offset: offset,
       );
     }
     if (filter.kind == _GalleryFilterKind.category) {
@@ -210,6 +217,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
     final hasQuery = _searchController.text.trim().isNotEmpty;
     final filters = [
       const _GalleryFilter.all(),
+      const _GalleryFilter.starred(),
       const _GalleryFilter.uncategorized(),
       ..._categories.map(_GalleryFilter.category),
     ];
@@ -228,6 +236,17 @@ class _ArticleListPageState extends State<ArticleListPage> {
         ),
         actions: _isSelecting
             ? [
+                IconButton(
+                  onPressed: () => _updateSelectedStarred(true),
+                  tooltip: '星标',
+                  icon: const Icon(Icons.star_rounded),
+                  color: const Color(0xffffb300),
+                ),
+                IconButton(
+                  onPressed: () => _updateSelectedStarred(false),
+                  tooltip: '取消星标',
+                  icon: const Icon(Icons.star_border_rounded),
+                ),
                 IconButton(
                   onPressed: _assignSelectedCategory,
                   tooltip: '设置分类',
@@ -268,15 +287,21 @@ class _ArticleListPageState extends State<ArticleListPage> {
                     return ChoiceChip(
                       selected: selected,
                       label: Text(filter.label),
-                      avatar: filter.kind == _GalleryFilterKind.category
-                          ? Icon(
-                              Icons.folder_rounded,
-                              size: 16,
-                              color: selected
-                                  ? Colors.white
-                                  : Color(filter.category!.color),
-                            )
-                          : null,
+                      avatar: switch (filter.kind) {
+                        _GalleryFilterKind.starred => Icon(
+                          Icons.star_rounded,
+                          size: 16,
+                          color: selected ? Colors.white : _accent,
+                        ),
+                        _GalleryFilterKind.category => Icon(
+                          Icons.folder_rounded,
+                          size: 16,
+                          color: selected
+                              ? Colors.white
+                              : Color(filter.category!.color),
+                        ),
+                        _ => null,
+                      },
                       showCheckmark: false,
                       selectedColor: _accent,
                       labelStyle: TextStyle(
@@ -433,6 +458,18 @@ class _ArticleListPageState extends State<ArticleListPage> {
         : categoryId;
     for (final article in selected) {
       await widget.store.assignArticleCategory(article.id, normalized);
+    }
+    widget.onChanged();
+    await _refresh();
+  }
+
+  Future<void> _updateSelectedStarred(bool isStarred) async {
+    final selected = _selectedArticles();
+    if (selected.isEmpty) {
+      return;
+    }
+    for (final article in selected) {
+      await widget.store.updateArticleStarred(article.id, isStarred);
     }
     widget.onChanged();
     await _refresh();

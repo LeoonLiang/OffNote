@@ -10,6 +10,8 @@ class ArticleSnapshot {
     required this.sourceUrl,
     required this.html,
     required this.imageUrls,
+    this.comments = const [],
+    this.commentCount,
     this.videoUrl,
     this.posterUrl,
     this.authorName,
@@ -22,11 +24,58 @@ class ArticleSnapshot {
   final String sourceUrl;
   final String html;
   final List<String> imageUrls;
+  final List<ArticleComment> comments;
+  final int? commentCount;
   final String? videoUrl;
   final String? posterUrl;
   final String? authorName;
   final String? authorAvatarUrl;
   final DateTime? publishedAt;
+}
+
+class ArticleComment {
+  const ArticleComment({
+    required this.authorName,
+    required this.content,
+    this.authorAvatarUrl,
+    this.localAuthorAvatarUri,
+    this.publishedAt,
+    this.ipLocation,
+    this.likeCount = 0,
+    this.depth = 0,
+    this.imageUrls = const [],
+    this.localImageUris = const [],
+  });
+
+  final String authorName;
+  final String content;
+  final String? authorAvatarUrl;
+  final String? localAuthorAvatarUri;
+  final DateTime? publishedAt;
+  final String? ipLocation;
+  final int likeCount;
+  final int depth;
+  final List<String> imageUrls;
+  final List<String> localImageUris;
+
+  ArticleComment copyWith({
+    String? localAuthorAvatarUri,
+    List<String>? localImageUris,
+  }) {
+    return ArticleComment(
+      authorName: authorName,
+      content: content,
+      authorAvatarUrl: authorAvatarUrl,
+      localAuthorAvatarUri:
+          localAuthorAvatarUri ?? this.localAuthorAvatarUri,
+      publishedAt: publishedAt,
+      ipLocation: ipLocation,
+      likeCount: likeCount,
+      depth: depth,
+      imageUrls: imageUrls,
+      localImageUris: localImageUris ?? this.localImageUris,
+    );
+  }
 }
 
 ArticleSnapshot parseArticleSnapshot({
@@ -41,6 +90,8 @@ ArticleSnapshot parseArticleSnapshot({
       sourceUrl: sourceUrl,
       html: html,
       imageUrls: xhsSnapshot.imageUrls,
+      comments: xhsSnapshot.comments,
+      commentCount: xhsSnapshot.commentCount,
       videoUrl: xhsSnapshot.videoUrl,
       posterUrl: xhsSnapshot.posterUrl,
       authorName: xhsSnapshot.authorName,

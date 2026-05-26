@@ -25,6 +25,7 @@ class ArticleSnapshotStore {
   Future<SavedArticle> save({
     required String rawHtml,
     required String sourceUrl,
+    String? originalUrl,
     bool allowPartialMedia = false,
   }) async {
     final snapshot = parseArticleSnapshot(html: rawHtml, sourceUrl: sourceUrl);
@@ -52,6 +53,11 @@ class ArticleSnapshotStore {
         snapshot: snapshot,
         imageDir: imageDir,
       );
+      final localComments = await _downloadCommentImages(
+        comments: snapshot.comments,
+        imageDir: imageDir,
+        sourceUrl: snapshot.sourceUrl,
+      );
       final localImageUrisByUrl = imageDownloads.localUrisByUrl;
       final localVideoUri = videoDownload.localUri;
       final failedImageCount =
@@ -77,6 +83,8 @@ class ArticleSnapshotStore {
             .map((url) => localImageUrisByUrl[url])
             .whereType<String>()
             .toList(growable: false),
+        comments: localComments,
+        commentCount: snapshot.commentCount,
         localVideoUri: localVideoUri,
         localPosterUri: localPosterUri,
         failedImageCount: failedImageCount,
@@ -105,6 +113,7 @@ class ArticleSnapshotStore {
             _filePathFromFileUri(localPosterUri) ??
             (localImages.isEmpty ? null : localImages.first.path),
         sourceUrl: sourceUrl,
+        originalUrl: originalUrl ?? sourceUrl,
         publishedAt: snapshot.publishedAt ?? now,
         savedAt: now,
         imagePaths: downloadedImagePaths,
@@ -160,6 +169,13 @@ class ArticleSnapshotStore {
     );
   }
 
+  Future<List<SavedArticle>> listStarredArticlesPage({
+    int limit = 20,
+    int offset = 0,
+  }) {
+    return _database.listStarredArticlesPage(limit: limit, offset: offset);
+  }
+
   Future<List<SavedArticle>> searchArticles(String query) {
     return _database.searchArticles(query);
   }
@@ -170,6 +186,7 @@ class ArticleSnapshotStore {
     int offset = 0,
     String? categoryId,
     bool uncategorizedOnly = false,
+    bool starredOnly = false,
   }) {
     return _database.searchArticlesPage(
       query,
@@ -177,6 +194,7 @@ class ArticleSnapshotStore {
       offset: offset,
       categoryId: categoryId,
       uncategorizedOnly: uncategorizedOnly,
+      starredOnly: starredOnly,
     );
   }
 
@@ -200,6 +218,10 @@ class ArticleSnapshotStore {
 
   Future<void> updateArticleRemark(String articleId, String remark) {
     return _database.updateArticleRemark(articleId, remark);
+  }
+
+  Future<void> updateArticleStarred(String articleId, bool isStarred) {
+    return _database.updateArticleStarred(articleId, isStarred);
   }
 
   Future<ArticleStorageStats> loadStorageStats() async {
@@ -320,6 +342,95 @@ class ArticleSnapshotStore {
           followRedirects: true,
           receiveTimeout: const Duration(seconds: 20),
           headers: _downloadHeaders(snapshot.sourceUrl),
+        ),
+      );
+      return file.uri.toString();
+    } catch (_) {
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+      return null;
+    }
+  }
+
+  Future<List<ArticleComment>> _downloadCommentImages({
+    required List<ArticleComment> comments,
+    required Directory imageDir,
+    required String sourceUrl,
+  }) async {
+    final localized = <ArticleComment>[];
+    for (var commentIndex = 0; commentIndex < comments.length; commentIndex++) {
+      final comment = comments[commentIndex];
+      final localAvatarUri = await _downloadCommentAvatar(
+        comment: comment,
+        imageDir: imageDir,
+        sourceUrl: sourceUrl,
+        commentIndex: commentIndex,
+      );
+      final localUris = <String>[];
+      for (
+        var imageIndex = 0;
+        imageIndex < comment.imageUrls.length;
+        imageIndex++
+      ) {
+        final imageUrl = comment.imageUrls[imageIndex];
+        final extension = _extensionForImageUrl(imageUrl);
+        final file = File(
+          p.join(
+            imageDir.path,
+            'comment_${commentIndex}_$imageIndex$extension',
+          ),
+        );
+        try {
+          await _dio.download(
+            imageUrl,
+            file.path,
+            options: Options(
+              followRedirects: true,
+              receiveTimeout: const Duration(seconds: 20),
+              headers: _downloadHeaders(sourceUrl),
+            ),
+          );
+          localUris.add(file.uri.toString());
+        } catch (_) {
+          if (file.existsSync()) {
+            file.deleteSync();
+          }
+        }
+      }
+      localized.add(
+        comment.copyWith(
+          localAuthorAvatarUri: localAvatarUri,
+          localImageUris: localUris,
+        ),
+      );
+    }
+    return localized.toList(growable: false);
+  }
+
+  Future<String?> _downloadCommentAvatar({
+    required ArticleComment comment,
+    required Directory imageDir,
+    required String sourceUrl,
+    required int commentIndex,
+  }) async {
+    final avatarUrl = comment.authorAvatarUrl;
+    if (avatarUrl == null) {
+      return null;
+    }
+
+    final extension = _extensionForImageUrl(avatarUrl);
+    final file = File(
+      p.join(imageDir.path, 'comment_avatar_$commentIndex$extension'),
+    );
+    try {
+      await _dio.download(
+        avatarUrl,
+        file.path,
+        options: Options(
+          followRedirects: true,
+          receiveTimeout: const Duration(seconds: 20),
+          headers: _downloadHeaders(sourceUrl),
         ),
       );
       return file.uri.toString();

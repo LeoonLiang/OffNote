@@ -1,6 +1,6 @@
 part of '../main.dart';
 
-enum _GalleryFilterKind { all, uncategorized, category }
+enum _GalleryFilterKind { all, starred, uncategorized, category }
 
 class _GalleryFilter {
   const _GalleryFilter._({
@@ -11,6 +11,9 @@ class _GalleryFilter {
 
   const _GalleryFilter.all()
     : this._(kind: _GalleryFilterKind.all, label: '全部');
+
+  const _GalleryFilter.starred()
+    : this._(kind: _GalleryFilterKind.starred, label: '星标');
 
   const _GalleryFilter.uncategorized()
     : this._(kind: _GalleryFilterKind.uncategorized, label: '未分类');
@@ -28,6 +31,7 @@ class _GalleryFilter {
 
   String get key => switch (kind) {
     _GalleryFilterKind.all => '__all__',
+    _GalleryFilterKind.starred => '__starred__',
     _GalleryFilterKind.uncategorized => '__uncategorized__',
     _GalleryFilterKind.category => category!.id,
   };
@@ -78,6 +82,12 @@ class _GalleryPageState extends State<GalleryPage> {
     if (filter.kind == _GalleryFilterKind.category) {
       return widget.store.listArticlesByCategoryPage(
         filter.category!.id,
+        limit: _pageSize,
+        offset: offset,
+      );
+    }
+    if (filter.kind == _GalleryFilterKind.starred) {
+      return widget.store.listStarredArticlesPage(
         limit: _pageSize,
         offset: offset,
       );
@@ -183,6 +193,7 @@ class _GalleryPageState extends State<GalleryPage> {
   Widget build(BuildContext context) {
     final filters = [
       const _GalleryFilter.all(),
+      const _GalleryFilter.starred(),
       const _GalleryFilter.uncategorized(),
       ..._categories.map(_GalleryFilter.category),
     ];
@@ -209,15 +220,21 @@ class _GalleryPageState extends State<GalleryPage> {
                   return ChoiceChip(
                     selected: selected,
                     label: Text(filter.label),
-                    avatar: filter.kind == _GalleryFilterKind.category
-                        ? Icon(
-                            Icons.folder_rounded,
-                            size: 16,
-                            color: selected
-                                ? Colors.white
-                                : Color(filter.category!.color),
-                          )
-                        : null,
+                    avatar: switch (filter.kind) {
+                      _GalleryFilterKind.starred => Icon(
+                        Icons.star_rounded,
+                        size: 16,
+                        color: selected ? Colors.white : _accent,
+                      ),
+                      _GalleryFilterKind.category => Icon(
+                        Icons.folder_rounded,
+                        size: 16,
+                        color: selected
+                            ? Colors.white
+                            : Color(filter.category!.color),
+                      ),
+                      _ => null,
+                    },
                     showCheckmark: false,
                     selectedColor: _accent,
                     labelStyle: TextStyle(

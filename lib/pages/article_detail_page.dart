@@ -17,6 +17,8 @@ class ArticleDetailPage extends StatefulWidget {
 }
 
 class _ArticleDetailPageState extends State<ArticleDetailPage> {
+  static const double _videoActionBarHeight = 51;
+
   late final WebViewController _controller;
   late final Future<OffNoteVideoSource?> _videoSourceFuture;
   late SavedArticle _article = widget.article;
@@ -32,38 +34,36 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final actionBar = _DetailBottomActionBar(
+      article: _article,
+      isVideo: _article.mediaType == ArticleMediaType.video,
+      onStarredTap: _toggleStarred,
+      onOpenOriginalTap: _article.originalUrl.trim().isEmpty
+          ? null
+          : _openOriginalUrl,
+      onRemarkTap: _editRemark,
+      onCategoryTap: _chooseCategory,
+    );
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_article.title, maxLines: 1),
-        actions: [
-          IconButton(
-            onPressed: _editRemark,
-            tooltip: '备注',
-            icon: const Icon(Icons.sticky_note_2_outlined),
-          ),
-          IconButton(
-            onPressed: _chooseCategory,
-            tooltip: '分类',
-            icon: const Icon(Icons.sell_outlined),
-          ),
-          IconButton(
-            onPressed: _copyHtmlToClipboard,
-            tooltip: '复制 HTML',
-            icon: const Icon(Icons.code),
-          ),
-          const Padding(
-            padding: EdgeInsets.only(right: 12),
-            child: Icon(Icons.cloud_off_outlined, color: _accent),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text(_article.title, maxLines: 1)),
       body: SafeArea(
-        child: Column(
-          children: [
-            _RemarkBar(article: _article, onTap: _editRemark),
-            Expanded(child: _buildArticleBody()),
-          ],
-        ),
+        child: _article.mediaType == ArticleMediaType.video
+            ? Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Positioned(left: 0, right: 0, bottom: 0, child: actionBar),
+                  Positioned.fill(
+                    bottom: _videoActionBarHeight,
+                    child: _buildArticleBody(),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  Expanded(child: _buildArticleBody()),
+                  actionBar,
+                ],
+              ),
       ),
     );
   }
@@ -151,24 +151,31 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     widget.onChanged();
   }
 
-  Future<void> _copyHtmlToClipboard() async {
-    try {
-      final html = await File(_article.htmlPath).readAsString();
-      await Clipboard.setData(ClipboardData(text: html));
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已复制 HTML：${html.length} 字符')));
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('复制失败：$error')));
+  Future<void> _openOriginalUrl() async {
+    final uri = Uri.tryParse(_article.originalUrl.trim());
+    if (uri == null) {
+      return;
     }
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!mounted || opened) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('没能打开原始链接')));
+  }
+
+  Future<void> _toggleStarred() async {
+    final next = !_article.isStarred;
+    await widget.store.updateArticleStarred(_article.id, next);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _article = _article.copyWith(isStarred: next));
+    widget.onChanged();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(next ? '已星标' : '已取消星标')));
   }
 
   Future<void> _editRemark() async {
@@ -211,52 +218,105 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   }
 }
 
-class _RemarkBar extends StatelessWidget {
-  const _RemarkBar({required this.article, required this.onTap});
+class _DetailBottomActionBar extends StatelessWidget {
+  const _DetailBottomActionBar({
+    required this.article,
+    required this.isVideo,
+    required this.onStarredTap,
+    required this.onOpenOriginalTap,
+    required this.onRemarkTap,
+    required this.onCategoryTap,
+  });
 
   final SavedArticle article;
-  final VoidCallback onTap;
+  final bool isVideo;
+  final VoidCallback onStarredTap;
+  final VoidCallback? onOpenOriginalTap;
+  final VoidCallback onRemarkTap;
+  final VoidCallback onCategoryTap;
 
   @override
   Widget build(BuildContext context) {
-    final hasRemark = article.remark.isNotEmpty;
+    final actions = [
+      _FloatingDetailAction(
+        icon: article.isStarred
+            ? Icons.star_rounded
+            : Icons.star_border_rounded,
+        iconColor: article.isStarred ? const Color(0xffffb300) : _muted,
+        inactiveIconColor: isVideo ? Colors.white70 : _muted,
+        onTap: onStarredTap,
+      ),
+      if (onOpenOriginalTap != null)
+        _FloatingDetailAction(
+          icon: Icons.open_in_new_rounded,
+          inactiveIconColor: isVideo ? Colors.white70 : _muted,
+          onTap: onOpenOriginalTap!,
+        ),
+      _FloatingDetailAction(
+        icon: article.remark.isEmpty
+            ? Icons.sticky_note_2_outlined
+            : Icons.sticky_note_2_rounded,
+        iconColor: article.remark.isEmpty ? _muted : _accent,
+        inactiveIconColor: isVideo ? Colors.white70 : _muted,
+        onTap: onRemarkTap,
+      ),
+      _FloatingDetailAction(
+        icon: Icons.sell_outlined,
+        iconColor: article.categoryId == null ? _muted : _accent,
+        inactiveIconColor: isVideo ? Colors.white70 : _muted,
+        onTap: onCategoryTap,
+      ),
+    ];
+
     return Material(
-      color: hasRemark ? Colors.white : _paper,
+      color: Colors.transparent,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: isVideo ? Colors.black : Colors.white,
+              border: isVideo
+                  ? null
+                  : const Border(top: BorderSide(color: Color(0xffdedfd7))),
+            ),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(10, isVideo ? 5 : 2, 10, 4),
+              child: Row(
+                children: [
+                  for (final action in actions) Expanded(child: action),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FloatingDetailAction extends StatelessWidget {
+  const _FloatingDetailAction({
+    required this.icon,
+    required this.onTap,
+    this.iconColor = _muted,
+    this.inactiveIconColor = _muted,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color iconColor;
+  final Color inactiveIconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = iconColor == _muted ? inactiveIconColor : iconColor;
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: Color(0xffdedfd7))),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                hasRemark
-                    ? Icons.sticky_note_2_rounded
-                    : Icons.sticky_note_2_outlined,
-                size: 18,
-                color: hasRemark ? _accent : _muted,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  hasRemark ? article.remark : '添加备注',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: hasRemark ? _ink : _muted,
-                    fontSize: 13,
-                    height: 1.35,
-                    fontWeight: hasRemark ? FontWeight.w600 : FontWeight.w500,
-                  ),
-                ),
-              ),
-              const Icon(Icons.edit_outlined, size: 16, color: _muted),
-            ],
-          ),
-        ),
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(height: 42, child: Icon(icon, color: color, size: 23)),
       ),
     );
   }

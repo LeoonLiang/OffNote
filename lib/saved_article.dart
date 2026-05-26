@@ -24,13 +24,15 @@ class SavedArticle {
     required this.htmlPath,
     required this.coverPath,
     required this.sourceUrl,
+    String? originalUrl,
     required this.publishedAt,
     required this.savedAt,
     this.imagePaths = const [],
     this.remark = '',
     this.mediaType = ArticleMediaType.image,
+    this.isStarred = false,
     this.categoryId,
-  });
+  }) : originalUrl = originalUrl ?? sourceUrl;
 
   final String id;
   final String title;
@@ -38,11 +40,13 @@ class SavedArticle {
   final String htmlPath;
   final String? coverPath;
   final String sourceUrl;
+  final String originalUrl;
   final DateTime publishedAt;
   final DateTime savedAt;
   final List<String> imagePaths;
   final String remark;
   final ArticleMediaType mediaType;
+  final bool isStarred;
   final String? categoryId;
 
   Map<String, Object?> toMap() {
@@ -53,9 +57,11 @@ class SavedArticle {
       'html_path': htmlPath,
       'cover_path': coverPath,
       'source_url': sourceUrl,
+      'original_url': originalUrl,
       'published_at': publishedAt.millisecondsSinceEpoch,
       'saved_at': savedAt.millisecondsSinceEpoch,
       'media_type': mediaType.value,
+      'is_starred': isStarred ? 1 : 0,
       'category_id': categoryId,
       'image_paths': jsonEncode(imagePaths),
       'remark': remark,
@@ -70,6 +76,8 @@ class SavedArticle {
       htmlPath: map['html_path'] as String,
       coverPath: map['cover_path'] as String?,
       sourceUrl: map['source_url'] as String? ?? '',
+      originalUrl:
+          map['original_url'] as String? ?? map['source_url'] as String? ?? '',
       publishedAt: DateTime.fromMillisecondsSinceEpoch(
         _intValue(map['published_at']),
       ),
@@ -77,6 +85,7 @@ class SavedArticle {
         _intValue(map['saved_at'] ?? map['published_at']),
       ),
       mediaType: ArticleMediaType.fromValue(map['media_type']),
+      isStarred: _intValue(map['is_starred']) == 1,
       categoryId: map['category_id'] as String?,
       imagePaths: _decodeStringList(map['image_paths']),
       remark: map['remark'] as String? ?? '',
@@ -85,7 +94,11 @@ class SavedArticle {
 
   static const _unset = Object();
 
-  SavedArticle copyWith({Object? categoryId = _unset, String? remark}) {
+  SavedArticle copyWith({
+    Object? categoryId = _unset,
+    String? remark,
+    bool? isStarred,
+  }) {
     return SavedArticle(
       id: id,
       title: title,
@@ -93,11 +106,13 @@ class SavedArticle {
       htmlPath: htmlPath,
       coverPath: coverPath,
       sourceUrl: sourceUrl,
+      originalUrl: originalUrl,
       publishedAt: publishedAt,
       savedAt: savedAt,
       imagePaths: imagePaths,
       remark: remark ?? this.remark,
       mediaType: mediaType,
+      isStarred: isStarred ?? this.isStarred,
       categoryId: identical(categoryId, _unset)
           ? this.categoryId
           : categoryId as String?,

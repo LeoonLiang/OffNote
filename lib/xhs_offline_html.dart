@@ -1,7 +1,11 @@
+import 'article_snapshot.dart';
+
 String buildXhsOfflineHtml({
   required String title,
   required String content,
   required List<String> localImageUris,
+  List<ArticleComment> comments = const [],
+  int? commentCount,
   String? localVideoUri,
   String? localPosterUri,
   int failedImageCount = 0,
@@ -32,6 +36,7 @@ String buildXhsOfflineHtml({
   final avatar = authorAvatarUri == null
       ? '<div class="avatar avatar-placeholder"></div>'
       : '<img class="avatar" src="${_escapeAttribute(authorAvatarUri)}" alt="">';
+  final commentsHtml = _buildCommentsHtml(comments, commentCount);
   final gallery = hasVideo
       ? '''
     <section class="gallery">
@@ -76,7 +81,7 @@ String buildXhsOfflineHtml({
     * { box-sizing: border-box; }
     html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif; }
     body { min-height: 100vh; }
-    .page { max-width: 520px; margin: 0 auto; background: var(--paper); min-height: 100vh; }
+    .page { max-width: 520px; margin: 0 auto; background: var(--paper); min-height: 100vh; padding-bottom: 72px; }
     .gallery { position: relative; background: #0f0f0f; }
     .gallery-empty { min-height: 260px; display: flex; align-items: center; justify-content: center; padding: 24px; }
     .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; background: #0f0f0f; }
@@ -101,6 +106,20 @@ String buildXhsOfflineHtml({
     .content { padding: 6px 16px 28px; border-top: 1px solid var(--line); }
     h1 { margin: 12px 0 10px; font-size: 20px; line-height: 1.35; letter-spacing: 0; }
     .desc { margin: 0; white-space: pre-wrap; font-size: 15px; line-height: 1.75; letter-spacing: 0; color: #252525; }
+    .comments { padding: 0 16px 34px; border-top: 8px solid var(--bg); }
+    .comments h2 { margin: 0; padding: 18px 0 2px; font-size: 16px; line-height: 1.35; letter-spacing: 0; }
+    .comment { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+    .comment.reply { margin-left: 44px; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; padding-top: 10px; }
+    .comment-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; background: #f0f0f0; display: block; }
+    .comment.reply .comment-avatar { width: 26px; height: 26px; }
+    .comment-avatar-placeholder { background: linear-gradient(135deg, #f0f0f0, #fafafa); }
+    .comment-main { min-width: 0; }
+    .comment-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-bottom: 4px; }
+    .comment-author { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a8a8a; font-size: 12px; line-height: 1.3; }
+    .comment-body { margin: 0; white-space: pre-wrap; font-size: 14px; line-height: 1.55; color: #202020; }
+    .comment-meta { margin-top: 6px; color: #aaa; font-size: 11px; line-height: 1.3; }
+    .comment-images { display: flex; gap: 7px; overflow-x: auto; padding-top: 9px; }
+    .comment-images img { width: 84px; height: 84px; border-radius: 7px; object-fit: cover; background: #eee; flex: 0 0 auto; }
   </style>
 </head>
 <body>
@@ -115,6 +134,7 @@ $gallery
       <h1>${_escapeHtml(title)}</h1>
       <p class="desc">${_escapeHtml(content)}</p>
     </article>
+    $commentsHtml
   </main>
   <script>
     (function () {
@@ -151,3 +171,44 @@ String _escapeHtml(String value) {
 }
 
 String _escapeAttribute(String value) => _escapeHtml(value);
+
+String _buildCommentsHtml(List<ArticleComment> comments, int? commentCount) {
+  if (comments.isEmpty) {
+    return '';
+  }
+
+  final title = commentCount == null || commentCount <= 0
+      ? '评论'
+      : '评论 $commentCount';
+  final items = comments.map(_buildCommentHtml).join();
+  return '''
+    <section class="comments">
+      <h2>${_escapeHtml(title)}</h2>
+      $items
+    </section>''';
+}
+
+String _buildCommentHtml(ArticleComment comment) {
+  final meta = [
+    if (comment.ipLocation != null) comment.ipLocation!,
+    if (comment.likeCount > 0) '${comment.likeCount} 赞',
+  ].join(' · ');
+  final avatar = comment.localAuthorAvatarUri == null
+      ? '<div class="comment-avatar comment-avatar-placeholder"></div>'
+      : '<img class="comment-avatar" src="${_escapeAttribute(comment.localAuthorAvatarUri!)}" alt="" loading="lazy" decoding="async">';
+  final images = comment.localImageUris.isEmpty
+      ? ''
+      : '<div class="comment-images">${comment.localImageUris.map((uri) => '<img src="${_escapeAttribute(uri)}" loading="lazy" decoding="async">').join()}</div>';
+  return '''
+      <section class="comment${comment.depth > 0 ? ' reply' : ''}">
+        $avatar
+        <div class="comment-main">
+          <div class="comment-head">
+            <div class="comment-author">${_escapeHtml(comment.authorName)}</div>
+          </div>
+          <p class="comment-body">${_escapeHtml(comment.content)}</p>
+          $images
+          ${meta.isEmpty ? '' : '<div class="comment-meta">${_escapeHtml(meta)}</div>'}
+        </div>
+      </section>''';
+}

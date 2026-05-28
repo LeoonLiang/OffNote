@@ -263,6 +263,11 @@ class _ArticleListPageState extends State<ArticleListPage> {
                   icon: const Icon(Icons.sell_outlined),
                 ),
                 IconButton(
+                  onPressed: _shareSelectedLinks,
+                  tooltip: '分享链接',
+                  icon: const Icon(LucideIcons.share2),
+                ),
+                IconButton(
                   onPressed: _confirmDeleteSelected,
                   tooltip: '删除',
                   icon: const Icon(LucideIcons.trash2),
@@ -485,6 +490,31 @@ class _ArticleListPageState extends State<ArticleListPage> {
     }
     widget.onChanged();
     await _refresh();
+  }
+
+  Future<void> _shareSelectedLinks() async {
+    final urls = selectedArticleShareUrls(_selectedArticles());
+    if (urls.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('选中的文章没有可分享的小红书链接')));
+      return;
+    }
+    final text = formatSelectedArticleLinks(urls);
+    try {
+      await SharePlus.instance.share(ShareParams(text: text));
+      if (!mounted) {
+        return;
+      }
+      _clearSelection();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('分享失败：$error')));
+    }
   }
 
   Future<String?> _pickCategory() async {

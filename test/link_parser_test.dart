@@ -2,6 +2,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:offnote/link_parser.dart';
 
 void main() {
+  group('extractUrls', () {
+    test('extracts multiple URLs from shared text in order', () {
+      const text =
+          'OffNote 分享了 2 篇笔记：\n\n'
+          'https://xhslink.com/a，'
+          'https://www.xiaohongshu.com/discovery/item/b?x=1。';
+
+      expect(extractUrls(text), [
+        'https://xhslink.com/a',
+        'https://www.xiaohongshu.com/discovery/item/b?x=1',
+      ]);
+    });
+
+    test('removes duplicates while preserving first occurrence', () {
+      const text =
+          'https://xhslink.com/a https://xhslink.com/b https://xhslink.com/a';
+
+      expect(extractUrls(text), [
+        'https://xhslink.com/a',
+        'https://xhslink.com/b',
+      ]);
+    });
+  });
+
   group('extractFirstUrl', () {
     test('extracts xhs short link from shared Chinese text', () {
       const text =

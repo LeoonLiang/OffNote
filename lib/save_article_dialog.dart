@@ -40,15 +40,17 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
     });
 
     try {
-      final url = extractFirstUrl(_textController.text);
-      if (url == null) {
+      final urls = supportedXhsUrls(extractUrls(_textController.text));
+      if (urls.isEmpty) {
         throw Exception('没有识别到链接');
       }
-      widget.queue.enqueue(url);
+      for (final url in urls) {
+        widget.queue.enqueue(url);
+      }
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(urls.length);
     } catch (error) {
       if (!mounted) {
         return;
@@ -64,7 +66,7 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
   Widget build(BuildContext context) {
     return ShadDialog(
       title: const Text('加入收录队列'),
-      description: const Text('链接会在后台解析并保存，完成后会通知你。'),
+      description: const Text('链接会在后台解析并保存，多个链接会依次排队处理。'),
       closeIcon: ShadIconButton.ghost(
         enabled: !_saving,
         icon: const Icon(LucideIcons.x),

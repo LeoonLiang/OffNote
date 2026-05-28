@@ -90,22 +90,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
   }
 
-  bool _isXhsUrl(String url) {
-    final host = Uri.tryParse(url)?.host ?? '';
-    return host == 'xhslink.com' ||
-        host == 'xiaohongshu.com' ||
-        host.endsWith('.xiaohongshu.com');
-  }
-
   Future<void> _checkClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim();
     if (text == null || text.isEmpty || text == _lastClipboard) return;
-    final url = extractFirstUrl(text);
-    if (url == null || !_isXhsUrl(url)) return;
+    final urls = supportedXhsUrls(extractUrls(text));
+    if (urls.isEmpty) return;
     if (!mounted) return;
     _lastClipboard = text;
-    _showClipboardPrompt(text);
+    _showClipboardPrompt(text, urls.length);
   }
 
   Future<void> _loadInitialSharedMedia() async {
@@ -123,8 +116,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (text == null || text == _lastSharedText) {
       return;
     }
-    final url = extractFirstUrl(text);
-    if (url == null || !_isXhsUrl(url)) {
+    final urls = supportedXhsUrls(extractUrls(text));
+    if (urls.isEmpty) {
       return;
     }
     if (!mounted) {
@@ -147,12 +140,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return null;
   }
 
-  void _showClipboardPrompt(String clipText) {
+  void _showClipboardPrompt(String clipText, int linkCount) {
     showShadDialog<void>(
       context: context,
       builder: (_) => ShadDialog.alert(
         title: const Text('检测到小红书链接'),
-        description: const Text('发现剪贴板中有小红书内容，是否直接保存？'),
+        description: Text(
+          linkCount == 1
+              ? '发现剪贴板中有小红书内容，是否直接保存？'
+              : '发现剪贴板中有 $linkCount 个小红书链接，是否全部保存？',
+        ),
         actions: [
           ShadButton.outline(
             onPressed: () => Navigator.of(context).pop(),
@@ -171,18 +168,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openSaveDialog({String? initialText}) async {
-    final queued = await showShadDialog<bool>(
+    final queuedCount = await showShadDialog<int>(
       context: context,
       barrierDismissible: false,
       builder: (_) =>
           SaveArticleDialog(queue: _saveQueue, initialText: initialText),
     );
-    if (queued != true || !mounted) {
+    if (queuedCount == null || !mounted) {
       return;
     }
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('已加入收录队列')));
+    ).showSnackBar(
+      SnackBar(
+        content: Text(
+          queuedCount == 1 ? '已加入收录队列' : '已加入 $queuedCount 个链接到收录队列',
+        ),
+      ),
+    );
   }
 
   Future<void> _openArticle(SavedArticle article) async {

@@ -621,6 +621,15 @@ class ArticleDatabase {
     return category;
   }
 
+  Future<void> upsertCategory(SavedCategory category) async {
+    final db = await _db;
+    await db.insert(
+      'categories',
+      category.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
   Future<void> renameCategory(String id, String name) async {
     final db = await _db;
     await db.update(

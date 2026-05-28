@@ -19,6 +19,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   int _refreshTick = 0;
   String? _lastClipboard;
   String? _lastSharedText;
+  final _consumedClipboardUrls = <String>{};
   StreamSubscription<List<SharedMediaFile>>? _shareSubscription;
 
   @override
@@ -94,10 +95,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim();
     if (text == null || text.isEmpty || text == _lastClipboard) return;
-    final urls = supportedXhsUrls(extractUrls(text));
+    final urls = unconsumedSupportedXhsUrls(
+      extractUrls(text),
+      _consumedClipboardUrls,
+    );
     if (urls.isEmpty) return;
     if (!mounted) return;
     _lastClipboard = text;
+    _consumedClipboardUrls.addAll(urls);
     _showClipboardPrompt(text, urls.length);
   }
 
@@ -177,9 +182,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (queuedCount == null || !mounted) {
       return;
     }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           queuedCount == 1 ? '已加入收录队列' : '已加入 $queuedCount 个链接到收录队列',
@@ -232,11 +235,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         onChanged: _refresh,
         refreshToken: _refreshTick,
       ),
-      SettingsPage(
-        store: _store,
-        queue: _saveQueue,
-        onChanged: _refresh,
-      ),
+      SettingsPage(store: _store, queue: _saveQueue, onChanged: _refresh),
     ];
 
     return Scaffold(

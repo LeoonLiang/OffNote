@@ -42,6 +42,10 @@ class _ArticleListPageState extends State<ArticleListPage> {
 
   bool get _isSelecting => _selectedIds.isNotEmpty;
 
+  bool get _allVisibleSelected =>
+      _articles.isNotEmpty &&
+      _articles.every((article) => _selectedIds.contains(article.id));
+
   @override
   void initState() {
     super.initState();
@@ -222,6 +226,18 @@ class _ArticleListPageState extends State<ArticleListPage> {
     setState(_selectedIds.clear);
   }
 
+  void _toggleSelectAllVisible() {
+    final next = toggleVisibleSelection(
+      selectedIds: _selectedIds,
+      visibleIds: _articles.map((article) => article.id),
+    );
+    setState(() {
+      _selectedIds
+        ..clear()
+        ..addAll(next);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasQuery = _searchController.text.trim().isNotEmpty;
@@ -246,6 +262,15 @@ class _ArticleListPageState extends State<ArticleListPage> {
         ),
         actions: _isSelecting
             ? [
+                IconButton(
+                  onPressed: _articles.isEmpty ? null : _toggleSelectAllVisible,
+                  tooltip: _allVisibleSelected ? '取消全选' : '全选',
+                  icon: Icon(
+                    _allVisibleSelected
+                        ? Icons.deselect_rounded
+                        : Icons.select_all_rounded,
+                  ),
+                ),
                 IconButton(
                   onPressed: () => _updateSelectedStarred(true),
                   tooltip: '星标',
@@ -390,10 +415,8 @@ class _ArticleListPageState extends State<ArticleListPage> {
   Future<void> _openArticle(SavedArticle article) async {
     final result = await Navigator.of(context).push<ArticleDetailResult>(
       MaterialPageRoute<ArticleDetailResult>(
-        builder: (_) => ArticleDetailPage(
-          article: article,
-          store: widget.store,
-        ),
+        builder: (_) =>
+            ArticleDetailPage(article: article, store: widget.store),
       ),
     );
     if (!result.needsListRefresh) {

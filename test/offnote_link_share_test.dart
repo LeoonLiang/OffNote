@@ -39,6 +39,20 @@ void main() {
     });
   });
 
+  test('returns only supported URLs that have not been consumed', () {
+    expect(
+      unconsumedSupportedXhsUrls(
+        [
+          'https://xhslink.com/a',
+          'https://example.com/ignored',
+          'https://xhslink.com/b',
+        ],
+        {'https://xhslink.com/a'},
+      ),
+      ['https://xhslink.com/b'],
+    );
+  });
+
   test('formats selected article links as plain text', () {
     final text = formatSelectedArticleLinks([
       'https://xhslink.com/a',
@@ -48,6 +62,20 @@ void main() {
     expect(
       text,
       'OffNote 分享了 2 篇笔记：\n\n'
+      'https://xhslink.com/a\n'
+      'https://xhslink.com/b',
+    );
+  });
+
+  test('formats folder article links with folder name', () {
+    final text = formatSelectedArticleLinks([
+      'https://xhslink.com/a',
+      'https://xhslink.com/b',
+    ], title: '旅行');
+
+    expect(
+      text,
+      'OffNote 分享了「旅行」里的 2 篇笔记：\n\n'
       'https://xhslink.com/a\n'
       'https://xhslink.com/b',
     );

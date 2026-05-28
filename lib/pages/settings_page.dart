@@ -45,6 +45,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       onTap: _openStorageStats,
                     ),
                     _SettingsTile(
+                      icon: Icons.backup_rounded,
+                      title: '备份与恢复',
+                      subtitle: '创建、恢复或删除本机备份',
+                      onTap: _openBackupManager,
+                    ),
+                    _SettingsTile(
                       icon: Icons.system_update_alt_rounded,
                       title: '检查更新',
                       subtitle: _checkingUpdate
@@ -111,6 +117,15 @@ class _SettingsPageState extends State<SettingsPage> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SaveQueuePage(queue: widget.queue),
+      ),
+    );
+  }
+
+  Future<void> _openBackupManager() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            BackupManagerPage(store: widget.store, onChanged: widget.onChanged),
       ),
     );
   }
@@ -249,6 +264,262 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
       throw Exception('无法打开 $url');
     }
+  }
+}
+
+class BackupManagerPage extends StatefulWidget {
+  const BackupManagerPage({
+    super.key,
+    required this.store,
+    required this.onChanged,
+  });
+
+  final ArticleSnapshotStore store;
+  final VoidCallback onChanged;
+
+  @override
+  State<BackupManagerPage> createState() => _BackupManagerPageState();
+}
+
+class _BackupManagerPageState extends State<BackupManagerPage> {
+  late Future<List<OffNoteBackupEntry>> _future = widget.store.listBackups();
+  bool _creating = false;
+  String? _busyPath;
+
+  Future<void> _refresh() async {
+    setState(() => _future = widget.store.listBackups());
+    await _future;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          '备份与恢复',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        actions: [
+          IconButton(
+            onPressed: _creating ? null : _createBackup,
+            tooltip: '立即备份',
+            icon: _creating
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: FutureBuilder<List<OffNoteBackupEntry>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final backups = snapshot.data ?? const <OffNoteBackupEntry>[];
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                children: [
+                  ShadButton(
+                    onPressed: _creating ? null : _createBackup,
+                    width: double.infinity,
+                    leading: _creating
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.backup_rounded, size: 18),
+                    child: Text(_creating ? '正在备份...' : '立即备份'),
+                  ),
+                  const SizedBox(height: 12),
+                  if (backups.isEmpty)
+                    const _EmptyMessage(
+                      icon: Icons.backup_table_rounded,
+                      text: '还没有备份',
+                    ),
+                  ...backups.map(_buildBackupTile),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBackupTile(OffNoteBackupEntry backup) {
+    final busy = _busyPath == backup.file.path;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: ShadCard(
+        padding: EdgeInsets.zero,
+        radius: BorderRadius.circular(8),
+        child: ListTile(
+          leading: const Icon(Icons.restore_rounded, color: _accent),
+          title: Text(
+            _formatBackupDate(backup.createdAt),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            '${backup.articleCount} 篇文章 · ${backup.categoryCount} 个分类 · ${_formatBytes(backup.sizeBytes)}',
+          ),
+          trailing: busy
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'restore') {
+                      _restoreBackup(backup);
+                    } else if (value == 'delete') {
+                      _deleteBackup(backup);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'restore', child: Text('恢复')),
+                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createBackup() async {
+    setState(() => _creating = true);
+    try {
+      await widget.store.createBackup();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('备份已创建')));
+      await _refresh();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('创建备份失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() => _creating = false);
+      }
+    }
+  }
+
+  Future<void> _restoreBackup(OffNoteBackupEntry backup) async {
+    final confirmed = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog.alert(
+        title: const Text('恢复备份'),
+        description: Text(
+          '将恢复 ${backup.articleCount} 篇文章和 ${backup.categoryCount} 个分类。'
+          '同一篇文章会被备份内容覆盖。',
+        ),
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ShadButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('恢复'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    setState(() => _busyPath = backup.file.path);
+    try {
+      final result = await widget.store.restoreBackup(backup.file);
+      widget.onChanged();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已恢复 ${result.articleCount} 篇文章、${result.categoryCount} 个分类',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('恢复备份失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() => _busyPath = null);
+      }
+    }
+  }
+
+  Future<void> _deleteBackup(OffNoteBackupEntry backup) async {
+    final confirmed = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog.alert(
+        title: const Text('删除备份'),
+        description: Text('确定删除 ${_formatBackupDate(backup.createdAt)} 的备份吗？'),
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ShadButton.destructive(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    setState(() => _busyPath = backup.file.path);
+    try {
+      await widget.store.deleteBackup(backup.file);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('备份已删除')));
+      await _refresh();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('删除备份失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() => _busyPath = null);
+      }
+    }
+  }
+
+  String _formatBackupDate(DateTime dateTime) {
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${dateTime.year}-${two(dateTime.month)}-${two(dateTime.day)} '
+        '${two(dateTime.hour)}:${two(dateTime.minute)}';
   }
 }
 

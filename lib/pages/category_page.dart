@@ -86,6 +86,7 @@ class _CategoryPageState extends State<CategoryPage> {
                         ),
                       ),
                     ),
+                    onShare: () => _shareCategoryLinks(category),
                     onRename: () => _renameCategory(category),
                     onDelete: () => _deleteCategory(category),
                   ),
@@ -144,6 +145,34 @@ class _CategoryPageState extends State<CategoryPage> {
     await widget.store.deleteCategory(category.id);
     widget.onChanged();
     await _refresh();
+  }
+
+  Future<void> _shareCategoryLinks(SavedCategory category) async {
+    try {
+      final articles = await widget.store.listArticlesByCategory(category.id);
+      final urls = selectedArticleShareUrls(articles);
+      if (!mounted) {
+        return;
+      }
+      if (urls.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('「${category.name}」里没有可分享的小红书链接')),
+        );
+        return;
+      }
+      await SharePlus.instance.share(
+        ShareParams(
+          text: formatSelectedArticleLinks(urls, title: category.name),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('分享文件夹失败：$error')));
+    }
   }
 
   Future<String?> _askName({

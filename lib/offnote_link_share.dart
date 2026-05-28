@@ -20,6 +20,15 @@ List<String> supportedXhsUrls(Iterable<String> urls) {
   return supported;
 }
 
+List<String> unconsumedSupportedXhsUrls(
+  Iterable<String> urls,
+  Set<String> consumedUrls,
+) {
+  return supportedXhsUrls(
+    urls,
+  ).where((url) => !consumedUrls.contains(url)).toList(growable: false);
+}
+
 List<String> selectedArticleShareUrls(Iterable<SavedArticle> articles) {
   return supportedXhsUrls(
     articles.map((article) {
@@ -29,6 +38,10 @@ List<String> selectedArticleShareUrls(Iterable<SavedArticle> articles) {
   );
 }
 
-String formatSelectedArticleLinks(List<String> urls) {
-  return 'OffNote 分享了 ${urls.length} 篇笔记：\n\n${urls.join('\n')}';
+String formatSelectedArticleLinks(List<String> urls, {String? title}) {
+  final normalizedTitle = title?.trim();
+  final prefix = normalizedTitle == null || normalizedTitle.isEmpty
+      ? 'OffNote 分享了 ${urls.length} 篇笔记：'
+      : 'OffNote 分享了「$normalizedTitle」里的 ${urls.length} 篇笔记：';
+  return '$prefix\n\n${urls.join('\n')}';
 }

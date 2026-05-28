@@ -4,12 +4,14 @@ class _CategoryTile extends StatelessWidget {
   const _CategoryTile({
     required this.category,
     required this.onTap,
+    required this.onShare,
     required this.onRename,
     required this.onDelete,
   });
 
   final SavedCategory category;
   final VoidCallback onTap;
+  final VoidCallback onShare;
   final VoidCallback onRename;
   final VoidCallback onDelete;
 
@@ -36,13 +38,16 @@ class _CategoryTile extends StatelessWidget {
           subtitle: const Text('文件夹'),
           trailing: PopupMenuButton<String>(
             onSelected: (value) {
-              if (value == 'rename') {
+              if (value == 'share') {
+                onShare();
+              } else if (value == 'rename') {
                 onRename();
               } else if (value == 'delete') {
                 onDelete();
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(value: 'share', child: Text('分享链接')),
               PopupMenuItem(value: 'rename', child: Text('重命名')),
               PopupMenuItem(value: 'delete', child: Text('删除')),
             ],

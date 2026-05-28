@@ -10,6 +10,7 @@ import 'article_file_paths.dart';
 import 'article_snapshot.dart';
 import 'article_storage_stats.dart';
 import 'media_download_failure.dart';
+import 'offnote_backup_service.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 import 'xhs_offline_html.dart';
@@ -233,6 +234,38 @@ class ArticleSnapshotStore {
       articles: articles,
       categoryCount: categories.length,
     );
+  }
+
+  Future<File> createBackup() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return OffNoteBackupService(
+      database: _database,
+      documentsDirectory: documentsDirectory,
+    ).createManagedBackup();
+  }
+
+  Future<List<OffNoteBackupEntry>> listBackups() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return OffNoteBackupService(
+      database: _database,
+      documentsDirectory: documentsDirectory,
+    ).listBackups();
+  }
+
+  Future<OffNoteBackupImportResult> restoreBackup(File backupFile) async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return OffNoteBackupService(
+      database: _database,
+      documentsDirectory: documentsDirectory,
+    ).importFromFile(backupFile);
+  }
+
+  Future<void> deleteBackup(File backupFile) async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return OffNoteBackupService(
+      database: _database,
+      documentsDirectory: documentsDirectory,
+    ).deleteBackup(backupFile);
   }
 
   Future<void> deleteArticle(SavedArticle article) async {

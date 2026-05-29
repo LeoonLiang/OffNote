@@ -21,12 +21,10 @@ String buildXhsOfflineHtml({
   final warningHtml = mediaWarnings.isEmpty
       ? ''
       : '<div class="media-warning"><strong>媒体未完整保存</strong><span>${_escapeHtml(mediaWarnings.join('，'))}</span></div>';
-  final slides = localImageUris.indexed
-      .map(
-        (entry) =>
-            '<figure class="slide"><img src="${_escapeAttribute(entry.$2)}" loading="${entry.$1 == 0 ? 'eager' : 'lazy'}" decoding="async"></figure>',
-      )
-      .join();
+  final slides = localImageUris.indexed.map((entry) {
+    final uri = _escapeAttribute(entry.$2);
+    return '<figure class="slide"><img class="previewable-image" src="$uri" data-preview-src="$uri" loading="${entry.$1 == 0 ? 'eager' : 'lazy'}" decoding="async"></figure>';
+  }).join();
   final indicatorDots = localImageUris.indexed
       .map(
         (entry) =>
@@ -88,6 +86,7 @@ String buildXhsOfflineHtml({
     .carousel::-webkit-scrollbar { display: none; }
     .slide { flex: 0 0 100%; margin: 0; min-height: 320px; max-height: 72vh; scroll-snap-align: center; display: flex; align-items: center; justify-content: center; background: #111; }
     .slide img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .previewable-image { cursor: zoom-in; }
     .video-player { width: 100%; max-height: 72vh; min-height: 320px; display: block; background: #111; object-fit: contain; }
     .counter { position: absolute; right: 12px; top: 12px; z-index: 2; padding: 4px 9px; border-radius: 999px; background: rgba(0,0,0,.48); color: #fff; font-size: 12px; font-weight: 700; }
     .dots { position: absolute; left: 0; right: 0; bottom: 10px; z-index: 2; display: flex; justify-content: center; gap: 5px; pointer-events: none; }
@@ -155,6 +154,24 @@ $gallery
       }, { passive: true });
       update();
     })();
+    (function () {
+      if (window.__offnoteImagePreviewInstalled) return;
+      window.__offnoteImagePreviewInstalled = true;
+      document.addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target || !target.dataset || !target.dataset.previewSrc) return;
+        if (!window.OffNoteImagePreview || !window.OffNoteImagePreview.postMessage) return;
+        var src = target.dataset.previewSrc;
+        var group = target.closest('.carousel, .comment-images');
+        var images = group ? Array.prototype.slice.call(group.querySelectorAll('[data-preview-src]')) : [target];
+        var sources = images.map(function (image) { return image.dataset.previewSrc; }).filter(Boolean);
+        window.OffNoteImagePreview.postMessage(JSON.stringify({
+          src: src,
+          sources: sources,
+          index: Math.max(0, sources.indexOf(src))
+        }));
+      });
+    })();
   </script>
 </body>
 </html>
@@ -198,7 +215,10 @@ String _buildCommentHtml(ArticleComment comment) {
       : '<img class="comment-avatar" src="${_escapeAttribute(comment.localAuthorAvatarUri!)}" alt="" loading="lazy" decoding="async">';
   final images = comment.localImageUris.isEmpty
       ? ''
-      : '<div class="comment-images">${comment.localImageUris.map((uri) => '<img src="${_escapeAttribute(uri)}" loading="lazy" decoding="async">').join()}</div>';
+      : '<div class="comment-images">${comment.localImageUris.map((rawUri) {
+          final uri = _escapeAttribute(rawUri);
+          return '<img class="comment-image previewable-image" src="$uri" data-preview-src="$uri" loading="lazy" decoding="async">';
+        }).join()}</div>';
   return '''
       <section class="comment${comment.depth > 0 ? ' reply' : ''}">
         $avatar

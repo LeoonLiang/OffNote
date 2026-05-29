@@ -27,6 +27,15 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel(
+        'OffNoteImagePreview',
+        onMessageReceived: (message) => _openImagePreview(message.message),
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) => _installImagePreviewHandler(),
+        ),
+      )
       ..loadFile(widget.article.htmlPath);
     _videoSourceFuture = _loadVideoSource();
   }
@@ -183,6 +192,77 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     ).showSnackBar(const SnackBar(content: Text('没能打开原始链接')));
   }
 
+  Future<void> _openImagePreview(String message) async {
+    final preview = _ImagePreviewRequest.fromMessage(message);
+    final files = preview.sources
+        .map(_fileFromPreviewSource)
+        .whereType<File>()
+        .where((file) => file.existsSync())
+        .toList(growable: false);
+    if (files.isEmpty || !mounted) {
+      return;
+    }
+    final tappedFile = _fileFromPreviewSource(preview.src);
+    final matchedIndex = tappedFile == null
+        ? -1
+        : files.indexWhere((file) => file.path == tappedFile.path);
+    final fallbackIndex = preview.index.clamp(0, files.length - 1);
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _ImagePreviewPage(
+          files: files,
+          initialIndex: matchedIndex < 0 ? fallbackIndex : matchedIndex,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
+  Future<void> _installImagePreviewHandler() async {
+    try {
+      await _controller.runJavaScript(r'''
+        (function () {
+          if (window.__offnoteImagePreviewInstalled) return;
+          window.__offnoteImagePreviewInstalled = true;
+          var images = document.querySelectorAll('.slide img, .comment-images img');
+          images.forEach(function (image) {
+            if (!image.dataset.previewSrc) image.dataset.previewSrc = image.currentSrc || image.src;
+            image.classList.add('previewable-image');
+            image.style.cursor = 'zoom-in';
+          });
+          document.addEventListener('click', function (event) {
+            var target = event.target;
+            if (!target || !target.dataset || !target.dataset.previewSrc) return;
+            if (!window.OffNoteImagePreview || !window.OffNoteImagePreview.postMessage) return;
+            var src = target.dataset.previewSrc;
+            var group = target.closest('.carousel, .comment-images');
+            var images = group ? Array.prototype.slice.call(group.querySelectorAll('[data-preview-src]')) : [target];
+            var sources = images.map(function (image) { return image.dataset.previewSrc; }).filter(Boolean);
+            window.OffNoteImagePreview.postMessage(JSON.stringify({
+              src: src,
+              sources: sources,
+              index: Math.max(0, sources.indexOf(src))
+            }));
+          });
+        })();
+      ''');
+    } catch (error) {
+      debugPrint('Install image preview handler failed: $error');
+    }
+  }
+
+  File? _fileFromPreviewSource(String source) {
+    final trimmed = source.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final uri = Uri.tryParse(trimmed);
+    if (uri != null && uri.scheme == 'file') {
+      return File(uri.toFilePath());
+    }
+    return File(trimmed);
+  }
+
   Future<void> _toggleStarred() async {
     final next = !_article.isStarred;
     await widget.store.updateArticleStarred(_article.id, next);
@@ -237,6 +317,112 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       _article = _article.copyWith(remark: remark);
       _hasListChanges = true;
     });
+  }
+}
+
+class _ImagePreviewRequest {
+  const _ImagePreviewRequest({
+    required this.src,
+    required this.sources,
+    required this.index,
+  });
+
+  final String src;
+  final List<String> sources;
+  final int index;
+
+  factory _ImagePreviewRequest.fromMessage(String message) {
+    try {
+      final decoded = jsonDecode(message);
+      if (decoded is Map<String, Object?>) {
+        final src = decoded['src'] as String? ?? '';
+        final sources = decoded['sources'] is List
+            ? (decoded['sources'] as List).whereType<String>().toList()
+            : <String>[];
+        final indexValue = decoded['index'];
+        return _ImagePreviewRequest(
+          src: src,
+          sources: sources.isEmpty ? [src] : sources,
+          index: indexValue is num ? indexValue.toInt() : 0,
+        );
+      }
+    } catch (_) {
+      return _ImagePreviewRequest(src: message, sources: [message], index: 0);
+    }
+    return _ImagePreviewRequest(src: message, sources: [message], index: 0);
+  }
+}
+
+class _ImagePreviewPage extends StatefulWidget {
+  const _ImagePreviewPage({required this.files, required this.initialIndex});
+
+  final List<File> files;
+  final int initialIndex;
+
+  @override
+  State<_ImagePreviewPage> createState() => _ImagePreviewPageState();
+}
+
+class _ImagePreviewPageState extends State<_ImagePreviewPage> {
+  late final PageController _pageController;
+  late int _index = widget.initialIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          onPressed: () => Navigator.of(context).pop(),
+          tooltip: '关闭',
+          icon: const Icon(Icons.close_rounded),
+        ),
+        title: Text(
+          '${_index + 1} / ${widget.files.length}',
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+      ),
+      body: SafeArea(
+        child: PhotoViewGallery.builder(
+          pageController: _pageController,
+          itemCount: widget.files.length,
+          backgroundDecoration: const BoxDecoration(color: Colors.black),
+          onPageChanged: (index) => setState(() => _index = index),
+          builder: (context, index) {
+            return PhotoViewGalleryPageOptions(
+              imageProvider: FileImage(widget.files[index]),
+              minScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 4,
+              errorBuilder: (_, _, _) => const Center(
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white70,
+                  size: 42,
+                ),
+              ),
+            );
+          },
+          loadingBuilder: (_, _) => const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -17,6 +17,20 @@ void main() {
 
     expect(html, contains('class="carousel"'));
     expect(html, contains('file:///tmp/article/images/image_0.jpg'));
+    expect(
+      html,
+      contains(
+        'class="previewable-image" src="file:///tmp/article/images/image_0.jpg"',
+      ),
+    );
+    expect(
+      html,
+      contains('data-preview-src="file:///tmp/article/images/image_0.jpg"'),
+    );
+    expect(html, contains('closest(\'.carousel, .comment-images\')'));
+    expect(html, contains('sources: sources'));
+    expect(html, contains('index: Math.max(0, sources.indexOf(src))'));
+    expect(html, contains('OffNoteImagePreview.postMessage'));
     expect(html, contains('id="current-slide"'));
     expect(html, contains('class="dot active"'));
     expect(html, contains('蓝蓝'));
@@ -65,7 +79,8 @@ void main() {
         ArticleComment(
           authorName: '墩墩',
           content: '国庆去不知道还好看吗？',
-          localAuthorAvatarUri: 'file:///tmp/article/images/comment_avatar_0.jpg',
+          localAuthorAvatarUri:
+              'file:///tmp/article/images/comment_avatar_0.jpg',
           ipLocation: '河南',
           likeCount: 3,
           depth: 0,
@@ -94,5 +109,15 @@ void main() {
     expect(html, contains('class="comment reply"'));
     expect(html, isNot(contains('border-left: 2px solid')));
     expect(html, contains('file:///tmp/article/images/comment_0_0.jpg'));
+    expect(
+      html,
+      contains(
+        'class="comment-image previewable-image" src="file:///tmp/article/images/comment_0_0.jpg"',
+      ),
+    );
+    expect(
+      html,
+      contains('data-preview-src="file:///tmp/article/images/comment_0_0.jpg"'),
+    );
   });
 }

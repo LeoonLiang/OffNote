@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';

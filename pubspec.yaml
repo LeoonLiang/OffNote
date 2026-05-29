@@ -50,6 +50,7 @@ dependencies:
   url_launcher: ^6.3.2
   share_plus: ^13.1.0
   archive: ^4.0.9
+  photo_view: ^0.15.0
 
 dev_dependencies:
   flutter_test:

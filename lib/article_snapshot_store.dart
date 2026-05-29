@@ -13,6 +13,7 @@ import 'media_download_failure.dart';
 import 'offnote_backup_service.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_tag.dart';
 import 'xhs_offline_html.dart';
 
 class ArticleSnapshotStore {
@@ -142,12 +143,14 @@ class ArticleSnapshotStore {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) {
     return _database.listArticlesPage(
       limit: limit,
       offset: offset,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
@@ -161,6 +164,7 @@ class ArticleSnapshotStore {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) {
     return _database.listArticlesByCategoryPage(
       categoryId,
@@ -168,6 +172,7 @@ class ArticleSnapshotStore {
       offset: offset,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
@@ -176,12 +181,14 @@ class ArticleSnapshotStore {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) {
     return _database.listUncategorizedArticlesPage(
       limit: limit,
       offset: offset,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
@@ -190,12 +197,14 @@ class ArticleSnapshotStore {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) {
     return _database.listStarredArticlesPage(
       limit: limit,
       offset: offset,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
@@ -212,6 +221,7 @@ class ArticleSnapshotStore {
     bool starredOnly = false,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) {
     return _database.searchArticlesPage(
       query,
@@ -222,10 +232,53 @@ class ArticleSnapshotStore {
       starredOnly: starredOnly,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
   Future<List<SavedCategory>> listCategories() => _database.listCategories();
+
+  Future<List<SavedTag>> listTags() => _database.listTags();
+
+  Future<SavedTag> createTag(String name, int color) {
+    return _database.createTag(name, color);
+  }
+
+  Future<void> renameTag(String id, String name) {
+    return _database.renameTag(id, name);
+  }
+
+  Future<void> deleteTag(String id) {
+    return _database.deleteTag(id);
+  }
+
+  Future<List<SavedTag>> listArticleTags(String articleId) {
+    return _database.listArticleTags(articleId);
+  }
+
+  Future<Map<String, List<SavedTag>>> listTagsByArticleIds(
+    Iterable<String> articleIds,
+  ) {
+    return _database.listTagsByArticleIds(articleIds);
+  }
+
+  Future<void> setArticleTags(String articleId, Set<String> tagIds) {
+    return _database.setArticleTags(articleId, tagIds);
+  }
+
+  Future<void> addTagsToArticles(
+    Iterable<String> articleIds,
+    Set<String> tagIds,
+  ) {
+    return _database.addTagsToArticles(articleIds, tagIds);
+  }
+
+  Future<void> removeTagsFromArticles(
+    Iterable<String> articleIds,
+    Set<String> tagIds,
+  ) {
+    return _database.removeTagsFromArticles(articleIds, tagIds);
+  }
 
   Future<SavedCategory> createCategory(String name, int color) {
     return _database.createCategory(name, color);

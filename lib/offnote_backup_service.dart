@@ -7,15 +7,18 @@ import 'package:path/path.dart' as p;
 import 'article_database.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_tag.dart';
 
 class OffNoteBackupImportResult {
   const OffNoteBackupImportResult({
     required this.articleCount,
     required this.categoryCount,
+    required this.tagCount,
   });
 
   final int articleCount;
   final int categoryCount;
+  final int tagCount;
 }
 
 class OffNoteBackupEntry {
@@ -24,6 +27,7 @@ class OffNoteBackupEntry {
     required this.createdAt,
     required this.articleCount,
     required this.categoryCount,
+    required this.tagCount,
     required this.sizeBytes,
   });
 
@@ -31,6 +35,7 @@ class OffNoteBackupEntry {
   final DateTime createdAt;
   final int articleCount;
   final int categoryCount;
+  final int tagCount;
   final int sizeBytes;
 }
 
@@ -50,6 +55,8 @@ class OffNoteBackupService {
   Future<File> exportToFile(File outputFile) async {
     final articles = await _database.listArticles();
     final categories = await _database.listCategories();
+    final tags = await _database.listTags();
+    final articleTags = await _database.listArticleTagAssignments();
     final archive = Archive();
 
     final manifest = {
@@ -60,6 +67,8 @@ class OffNoteBackupService {
       'categories': categories
           .map((category) => category.toMap())
           .toList(growable: false),
+      'tags': tags.map((tag) => tag.toMap()).toList(growable: false),
+      'article_tags': articleTags,
     };
     archive.addFile(
       ArchiveFile.string('offnote-backup.json', jsonEncode(manifest)),
@@ -116,17 +125,37 @@ class OffNoteBackupService {
     final articles = _listOfMaps(
       manifest['articles'],
     ).map(_articleFromBackupMap).toList(growable: false);
+    final tags = _listOfMaps(
+      manifest['tags'],
+    ).map(SavedTag.fromMap).toList(growable: false);
+    final articleTags = _listOfMaps(manifest['article_tags']);
 
     for (final category in categories) {
       await _database.upsertCategory(category);
     }
+    for (final tag in tags) {
+      await _database.upsertTag(tag);
+    }
     for (final article in articles) {
       await _database.upsertArticle(article);
+    }
+    for (final assignment in articleTags) {
+      final articleId = assignment['article_id'] as String?;
+      final tagId = assignment['tag_id'] as String?;
+      if (articleId == null || tagId == null) {
+        continue;
+      }
+      await _database.upsertArticleTagAssignment(
+        articleId,
+        tagId,
+        createdAt: assignment['created_at'] as int?,
+      );
     }
 
     return OffNoteBackupImportResult(
       articleCount: articles.length,
       categoryCount: categories.length,
+      tagCount: tags.length,
     );
   }
 
@@ -263,6 +292,7 @@ class OffNoteBackupService {
         createdAt: createdAt,
         articleCount: _listOfMaps(manifest['articles']).length,
         categoryCount: _listOfMaps(manifest['categories']).length,
+        tagCount: _listOfMaps(manifest['tags']).length,
         sizeBytes: file.lengthSync(),
       );
     } catch (_) {

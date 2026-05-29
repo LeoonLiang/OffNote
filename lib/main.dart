@@ -32,7 +32,9 @@ import 'save_queue.dart';
 import 'save_failure_message.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_tag.dart';
 import 'selection.dart';
+import 'tag_editor_sheet.dart';
 
 part 'theme.dart';
 part 'pages/home_page.dart';
@@ -44,6 +46,7 @@ part 'pages/article_detail_page.dart';
 part 'pages/storage_stats_page.dart';
 part 'pages/save_queue_page.dart';
 part 'pages/settings_page.dart';
+part 'pages/tag_manager_page.dart';
 part 'widgets/article_tile.dart';
 part 'widgets/category_tile.dart';
 part 'widgets/nav_item.dart';

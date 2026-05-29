@@ -7,6 +7,7 @@ class _ArticleTile extends StatelessWidget {
     required this.selected,
     required this.selectionMode,
     this.categoryLabel,
+    this.tags = const [],
     this.onLongPress,
     this.onDelete,
   });
@@ -18,6 +19,7 @@ class _ArticleTile extends StatelessWidget {
   final bool selected;
   final bool selectionMode;
   final String? categoryLabel;
+  final List<SavedTag> tags;
 
   @override
   Widget build(BuildContext context) {
@@ -126,6 +128,7 @@ class _ArticleTile extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                         ],
+                        ..._visibleTagBadges(tags),
                         Text(
                           _dateLabel(article.publishedAt),
                           style: const TextStyle(color: _muted, fontSize: 12),
@@ -147,6 +150,23 @@ class _ArticleTile extends StatelessWidget {
       ),
     );
   }
+}
+
+List<Widget> _visibleTagBadges(List<SavedTag> tags) {
+  if (tags.isEmpty) {
+    return const [];
+  }
+  final visible = tags.take(2).toList(growable: false);
+  return [
+    for (final tag in visible) ...[
+      Flexible(child: _TagBadge(tag: tag)),
+      const SizedBox(width: 6),
+    ],
+    if (tags.length > visible.length) ...[
+      _TagMoreBadge(count: tags.length - visible.length),
+      const SizedBox(width: 6),
+    ],
+  ];
 }
 
 class _CategoryBadge extends StatelessWidget {
@@ -181,6 +201,68 @@ class _CategoryBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _TagBadge extends StatelessWidget {
+  const _TagBadge({required this.tag});
+
+  final SavedTag tag;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 82),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Color(tag.color).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.label_rounded, size: 12, color: Color(tag.color)),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              tag.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Color(tag.color),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TagMoreBadge extends StatelessWidget {
+  const _TagMoreBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xfff0f0ec),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '+$count',
+        style: const TextStyle(
+          color: _muted,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }

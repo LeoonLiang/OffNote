@@ -60,8 +60,10 @@ class _GalleryPageState extends State<GalleryPage> {
   _GalleryFilter _filter = const _GalleryFilter.all();
   ArticleSort _sort = ArticleSort.publishedNewest;
   Set<ArticleMediaType> _mediaTypes = <ArticleMediaType>{};
+  Set<String> _tagIds = <String>{};
   bool _starredOnly = false;
   bool _isFilterExpanded = false;
+  var _tags = <SavedTag>[];
   int _loadGeneration = 0;
   bool _isLoading = false;
   bool _hasMore = true;
@@ -93,6 +95,7 @@ class _GalleryPageState extends State<GalleryPage> {
     int offset, {
     required ArticleSort sort,
     required Set<ArticleMediaType> mediaTypes,
+    required Set<String> tagIds,
     required bool starredOnly,
   }) {
     return widget.store.searchArticlesPage(
@@ -106,6 +109,7 @@ class _GalleryPageState extends State<GalleryPage> {
       starredOnly: starredOnly,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
@@ -114,6 +118,7 @@ class _GalleryPageState extends State<GalleryPage> {
     final filter = _filter;
     final sort = _sort;
     final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final tagIds = Set<String>.of(_tagIds);
     final starredOnly = _starredOnly;
     setState(() {
       _isLoading = true;
@@ -121,24 +126,35 @@ class _GalleryPageState extends State<GalleryPage> {
       _errorText = null;
     });
     try {
-      final results = await Future.wait([
+      final metadata = await Future.wait([
         widget.store.listCategories(),
-        _loadPage(
-          filter,
-          0,
-          sort: sort,
-          mediaTypes: mediaTypes,
-          starredOnly: starredOnly,
-        ),
+        widget.store.listTags(),
       ]);
       if (!mounted || generation != _loadGeneration) {
         return;
       }
+      final categories = metadata[0] as List<SavedCategory>;
+      final tags = metadata[1] as List<SavedTag>;
+      final availableTagIds = tags.map((tag) => tag.id).toSet();
+      final effectiveTagIds = tagIds.where(availableTagIds.contains).toSet();
+      final page = await _loadPage(
+        filter,
+        0,
+        sort: sort,
+        mediaTypes: mediaTypes,
+        tagIds: effectiveTagIds,
+        starredOnly: starredOnly,
+      );
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
       setState(() {
-        _categories = results[0] as List<SavedCategory>;
+        _categories = categories;
+        _tags = tags;
+        _tagIds = effectiveTagIds;
         _articles
           ..clear()
-          ..addAll(results[1] as List<SavedArticle>);
+          ..addAll(page);
         _hasMore = _articles.length == _pageSize;
         _isLoading = false;
       });
@@ -161,6 +177,7 @@ class _GalleryPageState extends State<GalleryPage> {
     final filter = _filter;
     final sort = _sort;
     final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final tagIds = Set<String>.of(_tagIds);
     final starredOnly = _starredOnly;
     setState(() => _isLoading = true);
     try {
@@ -169,6 +186,7 @@ class _GalleryPageState extends State<GalleryPage> {
         _articles.length,
         sort: sort,
         mediaTypes: mediaTypes,
+        tagIds: tagIds,
         starredOnly: starredOnly,
       );
       if (!mounted || generation != _loadGeneration) {
@@ -207,12 +225,14 @@ class _GalleryPageState extends State<GalleryPage> {
     required bool starredOnly,
     required ArticleSort sort,
     required Set<ArticleMediaType> mediaTypes,
+    required Set<String> tagIds,
   }) {
     setState(() {
       _filter = filter;
       _starredOnly = starredOnly;
       _sort = sort;
       _mediaTypes = mediaTypes;
+      _tagIds = tagIds;
     });
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
@@ -226,6 +246,7 @@ class _GalleryPageState extends State<GalleryPage> {
       starredOnly: settings.starredOnly,
       sort: settings.sort,
       mediaTypes: settings.mediaTypes,
+      tagIds: settings.tagIds,
     );
   }
 
@@ -235,6 +256,7 @@ class _GalleryPageState extends State<GalleryPage> {
       starredOnly: false,
       sort: ArticleSort.publishedNewest,
       mediaTypes: const {},
+      tagIds: const {},
     );
   }
 
@@ -283,6 +305,7 @@ class _GalleryPageState extends State<GalleryPage> {
                 panel: ArticleFilterPanel(
                   settings: _currentFilterSettings,
                   categories: _categories,
+                  tags: _tags,
                   onChanged: _applyFilterSettings,
                   onReset: _resetFilters,
                   onCollapse: () {
@@ -349,6 +372,7 @@ class _GalleryPageState extends State<GalleryPage> {
       return;
     }
     widget.onChanged();
+    await _refresh();
   }
 
   String get _filterSummary {
@@ -362,6 +386,13 @@ class _GalleryPageState extends State<GalleryPage> {
     if (_mediaTypes.length == 1) {
       parts.add(_mediaTypeLabel(_mediaTypes.single));
     }
+    if (_tagIds.isNotEmpty) {
+      final tagNames = _tags
+          .where((tag) => _tagIds.contains(tag.id))
+          .map((tag) => tag.name)
+          .toList(growable: false);
+      parts.add(tagNames.isEmpty ? '标签 ${_tagIds.length}' : tagNames.join('、'));
+    }
     return parts.join(' · ');
   }
 
@@ -373,6 +404,7 @@ class _GalleryPageState extends State<GalleryPage> {
         ? _filter.category!.id
         : null,
     mediaTypes: _mediaTypes,
+    tagIds: _tagIds,
   );
 
   String _sortLabel(ArticleSort sort) {

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'article_database.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_tag.dart';
 
 const _filterAccent = Color(0xffd83f5f);
 const _filterAccentSoft = Color(0xffffedf2);
@@ -17,6 +18,7 @@ class ArticleFilterSettings {
     this.uncategorizedOnly = false,
     this.categoryId,
     this.mediaTypes = const {},
+    this.tagIds = const {},
   });
 
   final ArticleSort sort;
@@ -24,6 +26,7 @@ class ArticleFilterSettings {
   final bool uncategorizedOnly;
   final String? categoryId;
   final Set<ArticleMediaType> mediaTypes;
+  final Set<String> tagIds;
 
   ArticleFilterSettings copyWith({
     ArticleSort? sort,
@@ -31,6 +34,7 @@ class ArticleFilterSettings {
     bool? uncategorizedOnly,
     Object? categoryId = _unset,
     Set<ArticleMediaType>? mediaTypes,
+    Set<String>? tagIds,
   }) {
     return ArticleFilterSettings(
       sort: sort ?? this.sort,
@@ -40,6 +44,7 @@ class ArticleFilterSettings {
           ? this.categoryId
           : categoryId as String?,
       mediaTypes: mediaTypes ?? this.mediaTypes,
+      tagIds: tagIds ?? this.tagIds,
     );
   }
 
@@ -55,10 +60,12 @@ class ArticleFilterPanel extends StatelessWidget {
     required this.onReset,
     required this.onCollapse,
     this.showCategoryFilters = true,
+    this.tags = const [],
   });
 
   final ArticleFilterSettings settings;
   final List<SavedCategory> categories;
+  final List<SavedTag> tags;
   final ValueChanged<ArticleFilterSettings> onChanged;
   final VoidCallback onReset;
   final VoidCallback onCollapse;
@@ -192,6 +199,25 @@ class ArticleFilterPanel extends StatelessWidget {
                       ),
                   ],
                 ),
+                if (tags.isNotEmpty)
+                  _Section(
+                    title: '标签',
+                    children: [
+                      _OptionChip(
+                        label: '不限',
+                        selected: settings.tagIds.isEmpty,
+                        onSelected: () =>
+                            onChanged(settings.copyWith(tagIds: const {})),
+                      ),
+                      ...tags.map(
+                        (tag) => _OptionChip(
+                          label: tag.name,
+                          selected: settings.tagIds.contains(tag.id),
+                          onSelected: () => _toggleTag(tag.id),
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -246,6 +272,14 @@ class ArticleFilterPanel extends StatelessWidget {
       next.clear();
     }
     onChanged(settings.copyWith(mediaTypes: next));
+  }
+
+  void _toggleTag(String tagId) {
+    final next = Set<String>.of(settings.tagIds);
+    if (!next.add(tagId)) {
+      next.remove(tagId);
+    }
+    onChanged(settings.copyWith(tagIds: next));
   }
 }
 

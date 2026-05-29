@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offnote/article_database.dart';
 import 'package:offnote/saved_article.dart';
+import 'package:offnote/saved_tag.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -305,6 +306,120 @@ void main() {
 
     expect(results.map((article) => article.id), ['a1']);
     expect(results.single.remark, '这里有雪山行程');
+  });
+
+  test(
+    'creates tags, assigns multiple tags, and filters by all selected tags',
+    () async {
+      final db = await openTestDatabase(inMemoryDatabasePath);
+
+      await db.upsertArticle(article(id: 'a1', title: '海边咖啡', content: '日落'));
+      await db.upsertArticle(article(id: 'a2', title: '城市咖啡', content: '书店'));
+      await db.upsertArticle(article(id: 'a3', title: '海边散步', content: '风景'));
+      final travel = await db.createTag('旅行', 0xff51b96b);
+      final coffee = await db.createTag('咖啡', 0xffd83f5f);
+
+      await db.setArticleTags('a1', {travel.id, coffee.id});
+      await db.setArticleTags('a2', {coffee.id});
+      await db.setArticleTags('a3', {travel.id});
+
+      final tagsByArticle = await db.listTagsByArticleIds(['a1', 'a2']);
+      final filtered = await db.searchArticlesPage(
+        '',
+        tagIds: {travel.id, coffee.id},
+      );
+
+      expect((await db.listTags()).map((tag) => tag.name), ['咖啡', '旅行']);
+      expect(tagsByArticle['a1']!.map((tag) => tag.name), ['咖啡', '旅行']);
+      expect(tagsByArticle['a2']!.map((tag) => tag.name), ['咖啡']);
+      expect(filtered.map((article) => article.id), ['a1']);
+    },
+  );
+
+  test(
+    'adds and removes batch tags and cleans relations when deleted',
+    () async {
+      final db = await openTestDatabase(inMemoryDatabasePath);
+
+      await db.upsertArticle(article(id: 'a1', title: '笔记 1', content: ''));
+      await db.upsertArticle(article(id: 'a2', title: '笔记 2', content: ''));
+      final tag = await db.createTag('待看', 0xff4f8df7);
+
+      await db.addTagsToArticles(['a1', 'a2'], {tag.id});
+      expect((await db.listArticleTags('a1')).single.name, '待看');
+      expect((await db.listArticleTags('a2')).single.name, '待看');
+
+      await db.removeTagsFromArticles(['a2'], {tag.id});
+      expect(await db.listArticleTags('a2'), isEmpty);
+
+      await db.deleteArticle('a1');
+      expect(await db.listTagsByArticleIds(['a1']), isEmpty);
+
+      await db.deleteTag(tag.id);
+      expect(await db.listTags(), isEmpty);
+      expect(await db.listArticleTags('a1'), isEmpty);
+    },
+  );
+
+  test('renames tags without changing article assignments', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(article(id: 'a1', title: '笔记', content: ''));
+    final tag = await db.createTag('待整理', 0xff4f8df7);
+    await db.setArticleTags('a1', {tag.id});
+
+    await db.renameTag(tag.id, '已整理');
+
+    expect((await db.listTags()).single.name, '已整理');
+    expect((await db.listArticleTags('a1')).single.name, '已整理');
+  });
+
+  test('restores tags from an older database migration', () async {
+    final path = await databaseFactory.getDatabasesPath();
+    final dbPath = '$path/offnote-v8-to-v9-migration-test.db';
+    await databaseFactory.deleteDatabase(dbPath);
+
+    final legacyDb = await databaseFactory.openDatabase(
+      dbPath,
+      options: OpenDatabaseOptions(
+        version: 8,
+        onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE articles (
+              id TEXT PRIMARY KEY,
+              title TEXT,
+              content TEXT,
+              html_path TEXT,
+              cover_path TEXT,
+              source_url TEXT,
+              original_url TEXT,
+              published_at INTEGER,
+              saved_at INTEGER,
+              media_type TEXT NOT NULL DEFAULT 'image',
+              is_starred INTEGER NOT NULL DEFAULT 0,
+              category_id TEXT,
+              image_paths TEXT,
+              remark TEXT NOT NULL DEFAULT ''
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE categories (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              color INTEGER NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+          ''');
+        },
+      ),
+    );
+    await legacyDb.close();
+
+    final migratedDb = await openTestDatabase(dbPath);
+    final tag = await migratedDb.createTag('迁移后标签', 0xffd83f5f);
+
+    expect(tag, isA<SavedTag>());
+    expect((await migratedDb.listTags()).single.name, '迁移后标签');
   });
 
   test(

@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_tag.dart';
 
 enum ArticleSort {
   publishedNewest('published_at DESC'),
@@ -49,7 +50,7 @@ class ArticleDatabase {
     final database = await (_databaseFactory ?? databaseFactory).openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 8,
+        version: 9,
         onCreate: (db, version) async {
           await _createSchema(db);
           await _tryCreateArticleFtsSchema(db);
@@ -92,6 +93,9 @@ class ArticleDatabase {
           }
           if (oldVersion < 8) {
             await _migrateToStarred(db);
+          }
+          if (oldVersion < 9) {
+            await _createTagSchema(db);
           }
         },
       ),
@@ -142,6 +146,35 @@ class ArticleDatabase {
     ''');
     await db.execute(
       'CREATE INDEX categories_created_at_idx ON categories(created_at)',
+    );
+    await _createTagSchema(db);
+  }
+
+  Future<void> _createTagSchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS tags (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS tags_created_at_idx ON tags(created_at)',
+    );
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS article_tags (
+        article_id TEXT NOT NULL,
+        tag_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(article_id, tag_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS article_tags_article_id_idx ON article_tags(article_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS article_tags_tag_id_idx ON article_tags(tag_id)',
     );
   }
 
@@ -381,9 +414,10 @@ class ArticleDatabase {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) async {
     final db = await _db;
-    final filter = _articleFilter(mediaTypes: mediaTypes);
+    final filter = _articleFilter(mediaTypes: mediaTypes, tagIds: tagIds);
     final rows = await db.query(
       'articles',
       where: filter.where,
@@ -412,12 +446,14 @@ class ArticleDatabase {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) async {
     final db = await _db;
     final filter = _articleFilter(
       clauses: ['category_id = ?'],
       args: [categoryId],
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
     final rows = await db.query(
       'articles',
@@ -435,11 +471,13 @@ class ArticleDatabase {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) async {
     final db = await _db;
     final filter = _articleFilter(
       clauses: ['category_id IS NULL'],
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
     final rows = await db.query(
       'articles',
@@ -457,11 +495,13 @@ class ArticleDatabase {
     int offset = 0,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) async {
     final db = await _db;
     final filter = _articleFilter(
       clauses: ['is_starred = 1'],
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
     final rows = await db.query(
       'articles',
@@ -487,11 +527,13 @@ class ArticleDatabase {
     bool starredOnly = false,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) async {
     final normalized = query.trim();
     if (normalized.isEmpty) {
       final hasCompoundFilters =
           mediaTypes.isNotEmpty ||
+          tagIds.isNotEmpty ||
           (starredOnly && (categoryId != null || uncategorizedOnly));
       if (hasCompoundFilters) {
         final db = await _db;
@@ -505,6 +547,7 @@ class ArticleDatabase {
           starredOnly: starredOnly,
           sort: sort,
           mediaTypes: mediaTypes,
+          tagIds: tagIds,
         );
       }
       if (starredOnly) {
@@ -513,6 +556,7 @@ class ArticleDatabase {
           offset: offset,
           sort: sort,
           mediaTypes: mediaTypes,
+          tagIds: tagIds,
         );
       }
       if (categoryId != null) {
@@ -522,6 +566,7 @@ class ArticleDatabase {
           offset: offset,
           sort: sort,
           mediaTypes: mediaTypes,
+          tagIds: tagIds,
         );
       }
       if (uncategorizedOnly) {
@@ -530,6 +575,7 @@ class ArticleDatabase {
           offset: offset,
           sort: sort,
           mediaTypes: mediaTypes,
+          tagIds: tagIds,
         );
       }
       return listArticlesPage(
@@ -537,6 +583,7 @@ class ArticleDatabase {
         offset: offset,
         sort: sort,
         mediaTypes: mediaTypes,
+        tagIds: tagIds,
       );
     }
 
@@ -546,6 +593,7 @@ class ArticleDatabase {
         uncategorizedOnly ||
         starredOnly ||
         mediaTypes.isNotEmpty ||
+        tagIds.isNotEmpty ||
         sort != ArticleSort.publishedNewest) {
       return _searchArticlesLike(
         db,
@@ -557,6 +605,7 @@ class ArticleDatabase {
         starredOnly: starredOnly,
         sort: sort,
         mediaTypes: mediaTypes,
+        tagIds: tagIds,
       );
     }
 
@@ -592,6 +641,7 @@ class ArticleDatabase {
     bool starredOnly = false,
     ArticleSort sort = ArticleSort.publishedNewest,
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) async {
     final clauses = ['(title LIKE ? OR content LIKE ? OR remark LIKE ?)'];
     final args = <Object?>['%$query%', '%$query%', '%$query%'];
@@ -608,6 +658,7 @@ class ArticleDatabase {
       clauses: clauses,
       args: args,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
     final rows = await db.query(
       'articles',
@@ -624,6 +675,7 @@ class ArticleDatabase {
     List<String> clauses = const [],
     List<Object?> args = const [],
     Set<ArticleMediaType> mediaTypes = const {},
+    Set<String> tagIds = const {},
   }) {
     final nextClauses = [...clauses];
     final nextArgs = <Object?>[...args];
@@ -633,6 +685,12 @@ class ArticleDatabase {
         'media_type IN (${List.filled(mediaTypes.length, '?').join(', ')})',
       );
       nextArgs.addAll(mediaTypes.map((type) => type.value));
+    }
+    for (final tagId in tagIds) {
+      nextClauses.add(
+        'id IN (SELECT article_id FROM article_tags WHERE tag_id = ?)',
+      );
+      nextArgs.add(tagId);
     }
     return _ArticleFilter(
       where: nextClauses.isEmpty ? null : nextClauses.join(' AND '),
@@ -647,6 +705,11 @@ class ArticleDatabase {
   Future<void> deleteArticle(String id) async {
     final db = await _db;
     await db.transaction((txn) async {
+      await txn.delete(
+        'article_tags',
+        where: 'article_id = ?',
+        whereArgs: [id],
+      );
       await txn.delete('articles', where: 'id = ?', whereArgs: [id]);
       if (!_articleFtsAvailable) {
         return;
@@ -663,6 +726,11 @@ class ArticleDatabase {
     final db = await _db;
     await db.transaction((txn) async {
       for (final id in uniqueIds) {
+        await txn.delete(
+          'article_tags',
+          where: 'article_id = ?',
+          whereArgs: [id],
+        );
         await txn.delete('articles', where: 'id = ?', whereArgs: [id]);
         if (_articleFtsAvailable) {
           await txn.delete('articles_fts', where: 'id = ?', whereArgs: [id]);
@@ -774,5 +842,171 @@ class ArticleDatabase {
       where: 'id = ?',
       whereArgs: [articleId],
     );
+  }
+
+  Future<List<SavedTag>> listTags() async {
+    final db = await _db;
+    final rows = await db.query('tags', orderBy: 'created_at DESC');
+    return rows.map(SavedTag.fromMap).toList(growable: false);
+  }
+
+  Future<SavedTag> createTag(String name, int color) async {
+    final tag = SavedTag(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      name: name.trim(),
+      color: color,
+      createdAt: DateTime.now(),
+    );
+    final db = await _db;
+    await db.insert('tags', tag.toMap());
+    return tag;
+  }
+
+  Future<void> upsertTag(SavedTag tag) async {
+    final db = await _db;
+    await db.insert(
+      'tags',
+      tag.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> renameTag(String id, String name) async {
+    final db = await _db;
+    await db.update(
+      'tags',
+      {'name': name.trim()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteTag(String id) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.delete('article_tags', where: 'tag_id = ?', whereArgs: [id]);
+      await txn.delete('tags', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  Future<List<SavedTag>> listArticleTags(String articleId) async {
+    final db = await _db;
+    final rows = await db.rawQuery(
+      '''
+      SELECT tags.*
+      FROM tags
+      JOIN article_tags ON article_tags.tag_id = tags.id
+      WHERE article_tags.article_id = ?
+      ORDER BY tags.created_at DESC
+      ''',
+      [articleId],
+    );
+    return rows.map(SavedTag.fromMap).toList(growable: false);
+  }
+
+  Future<Map<String, List<SavedTag>>> listTagsByArticleIds(
+    Iterable<String> articleIds,
+  ) async {
+    final uniqueIds = articleIds.toSet();
+    if (uniqueIds.isEmpty) {
+      return const {};
+    }
+    final db = await _db;
+    final placeholders = List.filled(uniqueIds.length, '?').join(', ');
+    final rows = await db.rawQuery('''
+      SELECT article_tags.article_id, tags.*
+      FROM article_tags
+      JOIN tags ON tags.id = article_tags.tag_id
+      WHERE article_tags.article_id IN ($placeholders)
+      ORDER BY tags.created_at DESC
+      ''', uniqueIds.toList(growable: false));
+    final result = <String, List<SavedTag>>{};
+    for (final row in rows) {
+      final articleId = row['article_id'] as String;
+      final tag = SavedTag.fromMap(row);
+      result.putIfAbsent(articleId, () => <SavedTag>[]).add(tag);
+    }
+    return result;
+  }
+
+  Future<List<Map<String, Object?>>> listArticleTagAssignments() async {
+    final db = await _db;
+    return db.query('article_tags', orderBy: 'created_at ASC');
+  }
+
+  Future<void> setArticleTags(String articleId, Set<String> tagIds) async {
+    final db = await _db;
+    await db.transaction((txn) async {
+      await txn.delete(
+        'article_tags',
+        where: 'article_id = ?',
+        whereArgs: [articleId],
+      );
+      await _insertArticleTags(txn, [articleId], tagIds);
+    });
+  }
+
+  Future<void> addTagsToArticles(
+    Iterable<String> articleIds,
+    Set<String> tagIds,
+  ) async {
+    final ids = articleIds.toSet();
+    if (ids.isEmpty || tagIds.isEmpty) {
+      return;
+    }
+    final db = await _db;
+    await db.transaction((txn) => _insertArticleTags(txn, ids, tagIds));
+  }
+
+  Future<void> removeTagsFromArticles(
+    Iterable<String> articleIds,
+    Set<String> tagIds,
+  ) async {
+    final ids = articleIds.toSet();
+    if (ids.isEmpty || tagIds.isEmpty) {
+      return;
+    }
+    final db = await _db;
+    await db.transaction((txn) async {
+      for (final articleId in ids) {
+        for (final tagId in tagIds) {
+          await txn.delete(
+            'article_tags',
+            where: 'article_id = ? AND tag_id = ?',
+            whereArgs: [articleId, tagId],
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> upsertArticleTagAssignment(
+    String articleId,
+    String tagId, {
+    int? createdAt,
+  }) async {
+    final db = await _db;
+    await db.insert('article_tags', {
+      'article_id': articleId,
+      'tag_id': tagId,
+      'created_at': createdAt ?? DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<void> _insertArticleTags(
+    DatabaseExecutor db,
+    Iterable<String> articleIds,
+    Set<String> tagIds,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final articleId in articleIds) {
+      for (final tagId in tagIds) {
+        await db.insert('article_tags', {
+          'article_id': articleId,
+          'tag_id': tagId,
+          'created_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+    }
   }
 }

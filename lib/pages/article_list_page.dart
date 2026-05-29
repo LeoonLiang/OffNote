@@ -34,10 +34,13 @@ class _ArticleListPageState extends State<ArticleListPage> {
   _GalleryFilter _filter = const _GalleryFilter.all();
   ArticleSort _sort = ArticleSort.publishedNewest;
   Set<ArticleMediaType> _mediaTypes = <ArticleMediaType>{};
+  Set<String> _tagIds = <String>{};
   bool _starredOnly = false;
   bool _isFilterExpanded = false;
   var _categories = <SavedCategory>[];
+  var _tags = <SavedTag>[];
   var _categoryNamesById = <String, String>{};
+  var _tagsByArticleId = <String, List<SavedTag>>{};
   Timer? _searchDebounce;
   int _loadGeneration = 0;
   bool _isLoading = false;
@@ -78,6 +81,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
     int offset, {
     required ArticleSort sort,
     required Set<ArticleMediaType> mediaTypes,
+    required Set<String> tagIds,
     required bool starredOnly,
   }) {
     final category = widget.category;
@@ -88,6 +92,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
         offset: offset,
         sort: sort,
         mediaTypes: mediaTypes,
+        tagIds: tagIds,
       );
     }
     final query = _searchController.text.trim();
@@ -103,6 +108,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
         starredOnly: starredOnly,
         sort: sort,
         mediaTypes: mediaTypes,
+        tagIds: tagIds,
       );
     }
     return widget.store.searchArticlesPage(
@@ -116,6 +122,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
       starredOnly: starredOnly,
       sort: sort,
       mediaTypes: mediaTypes,
+      tagIds: tagIds,
     );
   }
 
@@ -124,6 +131,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
     final filter = _filter;
     final sort = _sort;
     final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final tagIds = Set<String>.of(_tagIds);
     final starredOnly = _starredOnly;
     setState(() {
       _isLoading = true;
@@ -132,21 +140,34 @@ class _ArticleListPageState extends State<ArticleListPage> {
       _selectedIds.clear();
     });
     try {
-      final results = await Future.wait([
-        _loadPage(
-          filter,
-          0,
-          sort: sort,
-          mediaTypes: mediaTypes,
-          starredOnly: starredOnly,
-        ),
+      final metadata = await Future.wait([
         widget.store.listCategories(),
+        widget.store.listTags(),
       ]);
       if (!mounted || generation != _loadGeneration) {
         return;
       }
-      final page = results[0] as List<SavedArticle>;
-      final categories = results[1] as List<SavedCategory>;
+      final categories = metadata[0] as List<SavedCategory>;
+      final tags = metadata[1] as List<SavedTag>;
+      final availableTagIds = tags.map((tag) => tag.id).toSet();
+      final effectiveTagIds = tagIds.where(availableTagIds.contains).toSet();
+      final page = await _loadPage(
+        filter,
+        0,
+        sort: sort,
+        mediaTypes: mediaTypes,
+        tagIds: effectiveTagIds,
+        starredOnly: starredOnly,
+      );
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+      final tagsByArticleId = await widget.store.listTagsByArticleIds(
+        page.map((article) => article.id),
+      );
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
       setState(() {
         _articles
           ..clear()
@@ -155,6 +176,9 @@ class _ArticleListPageState extends State<ArticleListPage> {
           for (final category in categories) category.id: category.name,
         };
         _categories = categories;
+        _tags = tags;
+        _tagIds = effectiveTagIds;
+        _tagsByArticleId = tagsByArticleId;
         _hasMore = page.length == _pageSize;
         _isLoading = false;
       });
@@ -177,6 +201,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
     final filter = _filter;
     final sort = _sort;
     final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final tagIds = Set<String>.of(_tagIds);
     final starredOnly = _starredOnly;
     setState(() => _isLoading = true);
     try {
@@ -185,13 +210,21 @@ class _ArticleListPageState extends State<ArticleListPage> {
         _articles.length,
         sort: sort,
         mediaTypes: mediaTypes,
+        tagIds: tagIds,
         starredOnly: starredOnly,
+      );
+      if (!mounted || generation != _loadGeneration) {
+        return;
+      }
+      final tagsByArticleId = await widget.store.listTagsByArticleIds(
+        page.map((article) => article.id),
       );
       if (!mounted || generation != _loadGeneration) {
         return;
       }
       setState(() {
         _articles.addAll(page);
+        _tagsByArticleId.addAll(tagsByArticleId);
         _hasMore = page.length == _pageSize;
         _isLoading = false;
       });
@@ -230,12 +263,14 @@ class _ArticleListPageState extends State<ArticleListPage> {
     required bool starredOnly,
     required ArticleSort sort,
     required Set<ArticleMediaType> mediaTypes,
+    required Set<String> tagIds,
   }) {
     setState(() {
       _filter = filter;
       _starredOnly = starredOnly;
       _sort = sort;
       _mediaTypes = mediaTypes;
+      _tagIds = tagIds;
     });
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
@@ -249,6 +284,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
       starredOnly: settings.starredOnly,
       sort: settings.sort,
       mediaTypes: settings.mediaTypes,
+      tagIds: settings.tagIds,
     );
   }
 
@@ -258,6 +294,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
       starredOnly: false,
       sort: ArticleSort.publishedNewest,
       mediaTypes: const {},
+      tagIds: const {},
     );
   }
 
@@ -343,6 +380,11 @@ class _ArticleListPageState extends State<ArticleListPage> {
                   icon: const Icon(Icons.sell_outlined),
                 ),
                 IconButton(
+                  onPressed: _editSelectedTags,
+                  tooltip: '批量标签',
+                  icon: const Icon(Icons.label_outline_rounded),
+                ),
+                IconButton(
                   onPressed: _shareSelectedLinks,
                   tooltip: '分享链接',
                   icon: const Icon(LucideIcons.share2),
@@ -390,6 +432,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
                 panel: ArticleFilterPanel(
                   settings: _currentFilterSettings,
                   categories: _categories,
+                  tags: _tags,
                   showCategoryFilters: widget.category == null,
                   onChanged: _applyFilterSettings,
                   onReset: _resetFilters,
@@ -435,6 +478,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
                                 article,
                                 _categoryNamesById,
                               ),
+                              tags: _tagsByArticleId[article.id] ?? const [],
                               selected: _selectedIds.contains(article.id),
                               selectionMode: _isSelecting,
                               onTap: () => _isSelecting
@@ -467,9 +511,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
       return;
     }
     widget.onChanged();
-    if (widget.category != null) {
-      await _refresh();
-    }
+    await _refresh();
   }
 
   Future<void> _confirmDelete(SavedArticle article) async {
@@ -542,6 +584,55 @@ class _ArticleListPageState extends State<ArticleListPage> {
         : categoryId;
     for (final article in selected) {
       await widget.store.assignArticleCategory(article.id, normalized);
+    }
+    widget.onChanged();
+    await _refresh();
+  }
+
+  Future<void> _editSelectedTags() async {
+    final selected = _selectedArticles();
+    if (selected.isEmpty) {
+      return;
+    }
+    final action = await showModalBottomSheet<_BatchTagAction>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text(
+                '批量标签',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_rounded, color: _accent),
+              title: const Text('添加标签'),
+              onTap: () => Navigator.of(context).pop(_BatchTagAction.add),
+            ),
+            ListTile(
+              leading: const Icon(Icons.remove_rounded, color: _muted),
+              title: const Text('移除标签'),
+              onTap: () => Navigator.of(context).pop(_BatchTagAction.remove),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) {
+      return;
+    }
+    final tagIds = await _pickTags(title: action.label);
+    if (tagIds == null || tagIds.isEmpty) {
+      return;
+    }
+    final articleIds = selected.map((article) => article.id);
+    if (action == _BatchTagAction.add) {
+      await widget.store.addTagsToArticles(articleIds, tagIds);
+    } else {
+      await widget.store.removeTagsFromArticles(articleIds, tagIds);
     }
     widget.onChanged();
     await _refresh();
@@ -624,6 +715,57 @@ class _ArticleListPageState extends State<ArticleListPage> {
     );
   }
 
+  Future<Set<String>?> _pickTags({required String title}) async {
+    final tags = await widget.store.listTags();
+    if (!mounted) {
+      return null;
+    }
+    final selected = <String>{};
+    return showModalBottomSheet<Set<String>>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                title: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                trailing: TextButton(
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () =>
+                            Navigator.of(context).pop(Set<String>.of(selected)),
+                  child: const Text('完成'),
+                ),
+              ),
+              if (tags.isEmpty)
+                const ListTile(title: Text('还没有标签，先在文章详情里创建一个')),
+              ...tags.map(
+                (tag) => CheckboxListTile(
+                  value: selected.contains(tag.id),
+                  secondary: Icon(Icons.label_rounded, color: Color(tag.color)),
+                  title: Text(tag.name),
+                  activeColor: _accent,
+                  onChanged: (_) {
+                    setSheetState(() {
+                      if (!selected.add(tag.id)) {
+                        selected.remove(tag.id);
+                      }
+                    });
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   List<SavedArticle> _selectedArticles() {
     return _articles
         .where((article) => _selectedIds.contains(article.id))
@@ -641,6 +783,13 @@ class _ArticleListPageState extends State<ArticleListPage> {
     if (_mediaTypes.length == 1) {
       parts.add(_mediaTypeLabel(_mediaTypes.single));
     }
+    if (_tagIds.isNotEmpty) {
+      final tagNames = _tags
+          .where((tag) => _tagIds.contains(tag.id))
+          .map((tag) => tag.name)
+          .toList(growable: false);
+      parts.add(tagNames.isEmpty ? '标签 ${_tagIds.length}' : tagNames.join('、'));
+    }
     return parts.join(' · ');
   }
 
@@ -652,6 +801,7 @@ class _ArticleListPageState extends State<ArticleListPage> {
         ? _filter.category!.id
         : null,
     mediaTypes: _mediaTypes,
+    tagIds: _tagIds,
   );
 
   String _sortLabel(ArticleSort sort) {
@@ -668,6 +818,15 @@ class _ArticleListPageState extends State<ArticleListPage> {
       ArticleMediaType.video => '视频',
     };
   }
+}
+
+enum _BatchTagAction {
+  add('添加标签'),
+  remove('移除标签');
+
+  const _BatchTagAction(this.label);
+
+  final String label;
 }
 
 class _FilterBar extends StatelessWidget {

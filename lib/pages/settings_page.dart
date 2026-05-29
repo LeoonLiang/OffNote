@@ -51,6 +51,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       onTap: _openBackupManager,
                     ),
                     _SettingsTile(
+                      icon: Icons.label_outline_rounded,
+                      title: '标签管理',
+                      subtitle: '修改或删除已有标签',
+                      onTap: _openTagManager,
+                    ),
+                    _SettingsTile(
                       icon: Icons.system_update_alt_rounded,
                       title: '检查更新',
                       subtitle: _checkingUpdate
@@ -126,6 +132,15 @@ class _SettingsPageState extends State<SettingsPage> {
       MaterialPageRoute<void>(
         builder: (_) =>
             BackupManagerPage(store: widget.store, onChanged: widget.onChanged),
+      ),
+    );
+  }
+
+  Future<void> _openTagManager() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            TagManagerPage(store: widget.store, onChanged: widget.onChanged),
       ),
     );
   }
@@ -369,7 +384,7 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
           subtitle: Text(
-            '${backup.articleCount} 篇文章 · ${backup.categoryCount} 个分类 · ${_formatBytes(backup.sizeBytes)}',
+            '${backup.articleCount} 篇文章 · ${backup.categoryCount} 个分类 · ${backup.tagCount} 个标签 · ${_formatBytes(backup.sizeBytes)}',
           ),
           trailing: busy
               ? const SizedBox.square(
@@ -425,7 +440,7 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
       builder: (context) => ShadDialog.alert(
         title: const Text('恢复备份'),
         description: Text(
-          '将恢复 ${backup.articleCount} 篇文章和 ${backup.categoryCount} 个分类。'
+          '将恢复 ${backup.articleCount} 篇文章、${backup.categoryCount} 个分类和 ${backup.tagCount} 个标签。'
           '同一篇文章会被备份内容覆盖。',
         ),
         actions: [
@@ -453,7 +468,7 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '已恢复 ${result.articleCount} 篇文章、${result.categoryCount} 个分类',
+            '已恢复 ${result.articleCount} 篇文章、${result.categoryCount} 个分类、${result.tagCount} 个标签',
           ),
         ),
       );

@@ -20,6 +20,7 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   late final WebViewController _controller;
   late final Future<OffNoteVideoSource?> _videoSourceFuture;
   late SavedArticle _article = widget.article;
+  var _articleTags = <SavedTag>[];
   bool _hasListChanges = false;
 
   @override
@@ -38,6 +39,7 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       )
       ..loadFile(widget.article.htmlPath);
     _videoSourceFuture = _loadVideoSource();
+    _loadArticleTags();
   }
 
   @override
@@ -51,6 +53,8 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
           : _openOriginalUrl,
       onRemarkTap: _editRemark,
       onCategoryTap: _chooseCategory,
+      onTagsTap: _editTags,
+      hasTags: _articleTags.isNotEmpty,
     );
     return PopScope<ArticleDetailResult>(
       canPop: false,
@@ -118,6 +122,14 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
     return OffNoteVideoSource.fromHtml(html);
   }
 
+  Future<void> _loadArticleTags() async {
+    final tags = await widget.store.listArticleTags(_article.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _articleTags = tags);
+  }
+
   Future<void> _chooseCategory() async {
     final categories = await widget.store.listCategories();
     if (!mounted) {
@@ -176,6 +188,45 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       _article = _article.copyWith(categoryId: categoryId);
       _hasListChanges = true;
     });
+  }
+
+  Future<void> _editTags() async {
+    final allTags = await widget.store.listTags();
+    if (!mounted) {
+      return;
+    }
+    final selected = _articleTags.map((tag) => tag.id).toSet();
+    final result = await showModalBottomSheet<TagEditResult>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => TagEditorSheet(
+        initialTags: allTags,
+        initialSelectedIds: selected,
+        accentColor: _accent,
+        onCreateTag: (name) async {
+          final color =
+              _folderColors[DateTime.now().millisecond % _folderColors.length];
+          return widget.store.createTag(name, color);
+        },
+      ),
+    );
+    if (result == null) {
+      return;
+    }
+    await widget.store.setArticleTags(_article.id, result.selectedIds);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _articleTags = result.tags
+          .where((tag) => result.selectedIds.contains(tag.id))
+          .toList(growable: false);
+      _hasListChanges = true;
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('标签已更新')));
   }
 
   Future<void> _openOriginalUrl() async {
@@ -434,6 +485,8 @@ class _DetailBottomActionBar extends StatelessWidget {
     required this.onOpenOriginalTap,
     required this.onRemarkTap,
     required this.onCategoryTap,
+    required this.onTagsTap,
+    required this.hasTags,
   });
 
   final SavedArticle article;
@@ -442,6 +495,8 @@ class _DetailBottomActionBar extends StatelessWidget {
   final VoidCallback? onOpenOriginalTap;
   final VoidCallback onRemarkTap;
   final VoidCallback onCategoryTap;
+  final VoidCallback onTagsTap;
+  final bool hasTags;
 
   @override
   Widget build(BuildContext context) {
@@ -473,6 +528,12 @@ class _DetailBottomActionBar extends StatelessWidget {
         iconColor: article.categoryId == null ? _muted : _accent,
         inactiveIconColor: isVideo ? Colors.white70 : _muted,
         onTap: onCategoryTap,
+      ),
+      _FloatingDetailAction(
+        icon: hasTags ? Icons.label_rounded : Icons.label_outline_rounded,
+        iconColor: hasTags ? _accent : _muted,
+        inactiveIconColor: isVideo ? Colors.white70 : _muted,
+        onTap: onTagsTap,
       ),
     ];
 

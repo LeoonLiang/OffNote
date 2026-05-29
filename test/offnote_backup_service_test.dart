@@ -33,6 +33,7 @@ void main() {
         databasePath: '${sourceSupport.path}/offnote.db',
       );
       final category = await sourceDb.createCategory('旅行', 0xff51b96b);
+      final tag = await sourceDb.createTag('攻略', 0xffd83f5f);
       final articleDir = Directory('${sourceDocs.path}/articles/a1/images')
         ..createSync(recursive: true);
       final htmlFile = File('${sourceDocs.path}/articles/a1/index.html')
@@ -56,6 +57,7 @@ void main() {
           categoryId: category.id,
         ),
       );
+      await sourceDb.setArticleTags('a1', {tag.id});
 
       final backupFile = File('${root.path}/offnote.offnote-backup');
       await OffNoteBackupService(
@@ -74,8 +76,12 @@ void main() {
 
       final importedArticles = await targetDb.listArticles();
       final importedCategories = await targetDb.listCategories();
+      final importedTags = await targetDb.listTags();
+      final importedArticleTags = await targetDb.listArticleTags('a1');
 
       expect(importedCategories.single.name, '旅行');
+      expect(importedTags.single.name, '攻略');
+      expect(importedArticleTags.single.id, tag.id);
       expect(importedArticles.single.title, '离线攻略');
       expect(importedArticles.single.categoryId, category.id);
       expect(
@@ -136,6 +142,7 @@ void main() {
     expect(entries.single.file.path, backup.path);
     expect(entries.single.articleCount, 1);
     expect(entries.single.categoryCount, 1);
+    expect(entries.single.tagCount, 0);
     expect(entries.single.sizeBytes, greaterThan(0));
 
     await service.deleteBackup(backup);

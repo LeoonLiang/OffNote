@@ -12,6 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'app_update.dart';
+import 'article_database.dart';
+import 'article_filter_panel.dart';
 import 'article_snapshot_store.dart';
 import 'article_capture_service.dart';
 import 'article_display.dart';

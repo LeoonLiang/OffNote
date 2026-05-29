@@ -65,6 +65,10 @@ class SaveQueueController extends ChangeNotifier {
   }
 
   SaveQueueTask enqueue(String url) {
+    final existing = _findTaskByUrl(url);
+    if (existing != null) {
+      return existing;
+    }
     final task = SaveQueueTask(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       url: url,
@@ -76,17 +80,62 @@ class SaveQueueController extends ChangeNotifier {
     return task;
   }
 
+  void retryFailed() {
+    var changed = false;
+    for (final task in _tasks) {
+      if (task.status != SaveQueueTaskStatus.failed) {
+        continue;
+      }
+      _resetForRetry(task);
+      changed = true;
+    }
+    if (!changed) {
+      return;
+    }
+    notifyListeners();
+    unawaited(_process());
+  }
+
+  void cancelActionable() {
+    var changed = false;
+    for (final task in _tasks) {
+      if (task.status != SaveQueueTaskStatus.needsAction) {
+        continue;
+      }
+      task.status = SaveQueueTaskStatus.cancelled;
+      task.errorMessage = '已取消';
+      task.errorDetail = null;
+      task.canConfirmPartial = false;
+      changed = true;
+    }
+    if (!changed) {
+      return;
+    }
+    notifyListeners();
+    if (activeCount == 0) {
+      _completeIdle();
+    }
+  }
+
+  void clearFinished() {
+    final before = _tasks.length;
+    _tasks.removeWhere(
+      (task) =>
+          task.status == SaveQueueTaskStatus.success ||
+          task.status == SaveQueueTaskStatus.failed ||
+          task.status == SaveQueueTaskStatus.cancelled,
+    );
+    if (_tasks.length != before) {
+      notifyListeners();
+    }
+  }
+
   void retry(String taskId) {
     final task = _findTask(taskId);
     if (task == null) {
       return;
     }
-    task.status = SaveQueueTaskStatus.waiting;
-    task.errorMessage = null;
-    task.errorDetail = null;
-    task.canConfirmPartial = false;
-    task.attemptCount = 0;
-    task._allowPartialMedia = false;
+    _resetForRetry(task);
     notifyListeners();
     unawaited(_process());
   }
@@ -194,6 +243,25 @@ class SaveQueueController extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  SaveQueueTask? _findTaskByUrl(String url) {
+    final normalized = url.trim();
+    for (final task in _tasks) {
+      if (task.url.trim() == normalized) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  void _resetForRetry(SaveQueueTask task) {
+    task.status = SaveQueueTaskStatus.waiting;
+    task.errorMessage = null;
+    task.errorDetail = null;
+    task.canConfirmPartial = false;
+    task.attemptCount = 0;
+    task._allowPartialMedia = false;
   }
 
   void _completeIdle() {

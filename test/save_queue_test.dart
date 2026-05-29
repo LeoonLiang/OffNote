@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offnote/media_download_failure.dart';
 import 'package:offnote/save_queue.dart';
@@ -132,4 +134,74 @@ void main() {
       expect(task.status, SaveQueueTaskStatus.cancelled);
     },
   );
+
+  test('does not enqueue the same url twice while it is in history', () async {
+    final queue = SaveQueueController(
+      worker: (request) async => article(request.url),
+    );
+
+    final first = queue.enqueue('https://example.com/same');
+    final second = queue.enqueue('https://example.com/same');
+
+    await queue.idle;
+
+    expect(identical(first, second), isTrue);
+    expect(queue.tasks, hasLength(1));
+    expect(first.status, SaveQueueTaskStatus.success);
+  });
+
+  test('retries all failed tasks and cancels all actionable tasks', () async {
+    var shouldFail = true;
+    final queue = SaveQueueController(
+      worker: (request) async {
+        if (request.url.endsWith('/partial')) {
+          throw const MediaDownloadIncompleteException.video(reason: '视频超时');
+        }
+        if (shouldFail) {
+          throw Exception('网络失败');
+        }
+        return article(request.url);
+      },
+    );
+
+    final failed = queue.enqueue('https://example.com/fail');
+    final partial = queue.enqueue('https://example.com/partial');
+    await queue.idle;
+
+    expect(failed.status, SaveQueueTaskStatus.failed);
+    expect(partial.status, SaveQueueTaskStatus.needsAction);
+
+    shouldFail = false;
+    queue.retryFailed();
+    queue.cancelActionable();
+    await queue.idle;
+
+    expect(failed.status, SaveQueueTaskStatus.success);
+    expect(partial.status, SaveQueueTaskStatus.cancelled);
+  });
+
+  test('clears finished queue history without removing active tasks', () async {
+    final completer = Completer<SavedArticle>();
+    final queue = SaveQueueController(
+      worker: (request) async {
+        if (request.url.endsWith('/slow')) {
+          return completer.future;
+        }
+        return article(request.url);
+      },
+    );
+
+    final done = queue.enqueue('https://example.com/done');
+    await queue.idle;
+    final slow = queue.enqueue('https://example.com/slow');
+
+    await Future<void>.delayed(Duration.zero);
+    queue.clearFinished();
+
+    expect(queue.tasks, [slow]);
+    expect(done.status, SaveQueueTaskStatus.success);
+
+    completer.complete(article('slow'));
+    await queue.idle;
+  });
 }

@@ -13,6 +13,57 @@ class SaveQueuePage extends StatelessWidget {
           '收录队列',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          AnimatedBuilder(
+            animation: queue,
+            builder: (context, _) {
+              final hasFailed = queue.tasks.any(
+                (task) => task.status == SaveQueueTaskStatus.failed,
+              );
+              final hasActionable = queue.tasks.any(
+                (task) => task.status == SaveQueueTaskStatus.needsAction,
+              );
+              final hasFinished = queue.tasks.any(
+                (task) =>
+                    task.status == SaveQueueTaskStatus.success ||
+                    task.status == SaveQueueTaskStatus.failed ||
+                    task.status == SaveQueueTaskStatus.cancelled,
+              );
+              if (!hasFailed && !hasActionable && !hasFinished) {
+                return const SizedBox.shrink();
+              }
+              return PopupMenuButton<String>(
+                icon: const Icon(Icons.more_horiz_rounded),
+                onSelected: (value) {
+                  if (value == 'retry_failed') {
+                    queue.retryFailed();
+                  } else if (value == 'cancel_actionable') {
+                    queue.cancelActionable();
+                  } else if (value == 'clear_finished') {
+                    queue.clearFinished();
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (hasFailed)
+                    const PopupMenuItem(
+                      value: 'retry_failed',
+                      child: Text('重试失败任务'),
+                    ),
+                  if (hasActionable)
+                    const PopupMenuItem(
+                      value: 'cancel_actionable',
+                      child: Text('取消需处理任务'),
+                    ),
+                  if (hasFinished)
+                    const PopupMenuItem(
+                      value: 'clear_finished',
+                      child: Text('清理已完成记录'),
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
       ),
       body: AnimatedBuilder(
         animation: queue,

@@ -140,8 +140,15 @@ class ArticleSnapshotStore {
   Future<List<SavedArticle>> listArticlesPage({
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) {
-    return _database.listArticlesPage(limit: limit, offset: offset);
+    return _database.listArticlesPage(
+      limit: limit,
+      offset: offset,
+      sort: sort,
+      mediaTypes: mediaTypes,
+    );
   }
 
   Future<List<SavedArticle>> listArticlesByCategory(String categoryId) {
@@ -152,29 +159,44 @@ class ArticleSnapshotStore {
     String categoryId, {
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) {
     return _database.listArticlesByCategoryPage(
       categoryId,
       limit: limit,
       offset: offset,
+      sort: sort,
+      mediaTypes: mediaTypes,
     );
   }
 
   Future<List<SavedArticle>> listUncategorizedArticlesPage({
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) {
     return _database.listUncategorizedArticlesPage(
       limit: limit,
       offset: offset,
+      sort: sort,
+      mediaTypes: mediaTypes,
     );
   }
 
   Future<List<SavedArticle>> listStarredArticlesPage({
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) {
-    return _database.listStarredArticlesPage(limit: limit, offset: offset);
+    return _database.listStarredArticlesPage(
+      limit: limit,
+      offset: offset,
+      sort: sort,
+      mediaTypes: mediaTypes,
+    );
   }
 
   Future<List<SavedArticle>> searchArticles(String query) {
@@ -188,6 +210,8 @@ class ArticleSnapshotStore {
     String? categoryId,
     bool uncategorizedOnly = false,
     bool starredOnly = false,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) {
     return _database.searchArticlesPage(
       query,
@@ -196,6 +220,8 @@ class ArticleSnapshotStore {
       categoryId: categoryId,
       uncategorizedOnly: uncategorizedOnly,
       starredOnly: starredOnly,
+      sort: sort,
+      mediaTypes: mediaTypes,
     );
   }
 

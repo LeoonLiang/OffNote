@@ -7,6 +7,23 @@ import 'package:sqflite/sqflite.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 
+enum ArticleSort {
+  publishedNewest('published_at DESC'),
+  savedNewest('saved_at DESC'),
+  savedOldest('saved_at ASC');
+
+  const ArticleSort(this.orderBy);
+
+  final String orderBy;
+}
+
+class _ArticleFilter {
+  const _ArticleFilter({required this.where, required this.args});
+
+  final String? where;
+  final List<Object?>? args;
+}
+
 class ArticleDatabase {
   ArticleDatabase({
     DatabaseFactory? databaseFactory,
@@ -362,11 +379,16 @@ class ArticleDatabase {
   Future<List<SavedArticle>> listArticlesPage({
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) async {
     final db = await _db;
+    final filter = _articleFilter(mediaTypes: mediaTypes);
     final rows = await db.query(
       'articles',
-      orderBy: 'published_at DESC',
+      where: filter.where,
+      whereArgs: filter.args,
+      orderBy: sort.orderBy,
       limit: limit,
       offset: offset,
     );
@@ -388,13 +410,20 @@ class ArticleDatabase {
     String categoryId, {
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) async {
     final db = await _db;
+    final filter = _articleFilter(
+      clauses: ['category_id = ?'],
+      args: [categoryId],
+      mediaTypes: mediaTypes,
+    );
     final rows = await db.query(
       'articles',
-      where: 'category_id = ?',
-      whereArgs: [categoryId],
-      orderBy: 'published_at DESC',
+      where: filter.where,
+      whereArgs: filter.args,
+      orderBy: sort.orderBy,
       limit: limit,
       offset: offset,
     );
@@ -404,12 +433,19 @@ class ArticleDatabase {
   Future<List<SavedArticle>> listUncategorizedArticlesPage({
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) async {
     final db = await _db;
+    final filter = _articleFilter(
+      clauses: ['category_id IS NULL'],
+      mediaTypes: mediaTypes,
+    );
     final rows = await db.query(
       'articles',
-      where: 'category_id IS NULL',
-      orderBy: 'published_at DESC',
+      where: filter.where,
+      whereArgs: filter.args,
+      orderBy: sort.orderBy,
       limit: limit,
       offset: offset,
     );
@@ -419,12 +455,19 @@ class ArticleDatabase {
   Future<List<SavedArticle>> listStarredArticlesPage({
     int limit = 20,
     int offset = 0,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) async {
     final db = await _db;
+    final filter = _articleFilter(
+      clauses: ['is_starred = 1'],
+      mediaTypes: mediaTypes,
+    );
     final rows = await db.query(
       'articles',
-      where: 'is_starred = 1',
-      orderBy: 'published_at DESC',
+      where: filter.where,
+      whereArgs: filter.args,
+      orderBy: sort.orderBy,
       limit: limit,
       offset: offset,
     );
@@ -442,30 +485,68 @@ class ArticleDatabase {
     String? categoryId,
     bool uncategorizedOnly = false,
     bool starredOnly = false,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) async {
     final normalized = query.trim();
     if (normalized.isEmpty) {
+      final hasCompoundFilters =
+          mediaTypes.isNotEmpty ||
+          (starredOnly && (categoryId != null || uncategorizedOnly));
+      if (hasCompoundFilters) {
+        final db = await _db;
+        return _searchArticlesLike(
+          db,
+          normalized,
+          limit: limit,
+          offset: offset,
+          categoryId: categoryId,
+          uncategorizedOnly: uncategorizedOnly,
+          starredOnly: starredOnly,
+          sort: sort,
+          mediaTypes: mediaTypes,
+        );
+      }
       if (starredOnly) {
-        return listStarredArticlesPage(limit: limit, offset: offset);
+        return listStarredArticlesPage(
+          limit: limit,
+          offset: offset,
+          sort: sort,
+          mediaTypes: mediaTypes,
+        );
       }
       if (categoryId != null) {
         return listArticlesByCategoryPage(
           categoryId,
           limit: limit,
           offset: offset,
+          sort: sort,
+          mediaTypes: mediaTypes,
         );
       }
       if (uncategorizedOnly) {
-        return listUncategorizedArticlesPage(limit: limit, offset: offset);
+        return listUncategorizedArticlesPage(
+          limit: limit,
+          offset: offset,
+          sort: sort,
+          mediaTypes: mediaTypes,
+        );
       }
-      return listArticlesPage(limit: limit, offset: offset);
+      return listArticlesPage(
+        limit: limit,
+        offset: offset,
+        sort: sort,
+        mediaTypes: mediaTypes,
+      );
     }
 
     final db = await _db;
     if (!_articleFtsAvailable ||
         categoryId != null ||
         uncategorizedOnly ||
-        starredOnly) {
+        starredOnly ||
+        mediaTypes.isNotEmpty ||
+        sort != ArticleSort.publishedNewest) {
       return _searchArticlesLike(
         db,
         normalized,
@@ -474,6 +555,8 @@ class ArticleDatabase {
         categoryId: categoryId,
         uncategorizedOnly: uncategorizedOnly,
         starredOnly: starredOnly,
+        sort: sort,
+        mediaTypes: mediaTypes,
       );
     }
 
@@ -507,6 +590,8 @@ class ArticleDatabase {
     String? categoryId,
     bool uncategorizedOnly = false,
     bool starredOnly = false,
+    ArticleSort sort = ArticleSort.publishedNewest,
+    Set<ArticleMediaType> mediaTypes = const {},
   }) async {
     final clauses = ['(title LIKE ? OR content LIKE ? OR remark LIKE ?)'];
     final args = <Object?>['%$query%', '%$query%', '%$query%'];
@@ -519,15 +604,40 @@ class ArticleDatabase {
     if (starredOnly) {
       clauses.add('is_starred = 1');
     }
+    final filter = _articleFilter(
+      clauses: clauses,
+      args: args,
+      mediaTypes: mediaTypes,
+    );
     final rows = await db.query(
       'articles',
-      where: clauses.join(' AND '),
-      whereArgs: args,
-      orderBy: 'published_at DESC',
+      where: filter.where,
+      whereArgs: filter.args,
+      orderBy: sort.orderBy,
       limit: limit,
       offset: offset,
     );
     return rows.map(SavedArticle.fromMap).toList(growable: false);
+  }
+
+  _ArticleFilter _articleFilter({
+    List<String> clauses = const [],
+    List<Object?> args = const [],
+    Set<ArticleMediaType> mediaTypes = const {},
+  }) {
+    final nextClauses = [...clauses];
+    final nextArgs = <Object?>[...args];
+    if (mediaTypes.isNotEmpty &&
+        mediaTypes.length < ArticleMediaType.values.length) {
+      nextClauses.add(
+        'media_type IN (${List.filled(mediaTypes.length, '?').join(', ')})',
+      );
+      nextArgs.addAll(mediaTypes.map((type) => type.value));
+    }
+    return _ArticleFilter(
+      where: nextClauses.isEmpty ? null : nextClauses.join(' AND '),
+      args: nextArgs.isEmpty ? null : nextArgs,
+    );
   }
 
   String _ftsQuery(String query) {

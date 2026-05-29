@@ -169,6 +169,83 @@ void main() {
     expect(secondPage.map((article) => article.id), ['old']);
   });
 
+  test('lists articles by saved time when requested', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(id: 'old-save', title: '早保存', content: '', savedAt: 1),
+    );
+    await db.upsertArticle(
+      article(id: 'new-save', title: '晚保存', content: '', savedAt: 3),
+    );
+    await db.upsertArticle(
+      article(id: 'middle-save', title: '中间保存', content: '', savedAt: 2),
+    );
+
+    final newest = await db.listArticlesPage(sort: ArticleSort.savedNewest);
+    final oldest = await db.listArticlesPage(sort: ArticleSort.savedOldest);
+
+    expect(newest.map((article) => article.id), [
+      'new-save',
+      'middle-save',
+      'old-save',
+    ]);
+    expect(oldest.map((article) => article.id), [
+      'old-save',
+      'middle-save',
+      'new-save',
+    ]);
+  });
+
+  test('filters articles by multiple media types and other filters', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(
+        id: 'starred-video',
+        title: '视频',
+        content: '咖啡',
+        publishedAt: 3000,
+        mediaType: ArticleMediaType.video,
+        isStarred: true,
+      ),
+    );
+    await db.upsertArticle(
+      article(
+        id: 'starred-image',
+        title: '图文',
+        content: '咖啡',
+        publishedAt: 2000,
+        mediaType: ArticleMediaType.image,
+        isStarred: true,
+      ),
+    );
+    await db.upsertArticle(
+      article(
+        id: 'normal-video',
+        title: '普通视频',
+        content: '咖啡',
+        publishedAt: 1000,
+        mediaType: ArticleMediaType.video,
+      ),
+    );
+
+    final videos = await db.listArticlesPage(
+      mediaTypes: {ArticleMediaType.video},
+    );
+    final starredVideos = await db.searchArticlesPage(
+      '咖啡',
+      starredOnly: true,
+      mediaTypes: {ArticleMediaType.video},
+    );
+
+    expect(videos.map((article) => article.id), [
+      'starred-video',
+      'normal-video',
+    ]);
+    expect(starredVideos.map((article) => article.id), ['starred-video']);
+  });
+
   test(
     'lists uncategorized articles by page ordered by publish time',
     () async {

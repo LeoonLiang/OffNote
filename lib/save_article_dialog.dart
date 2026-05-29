@@ -44,13 +44,25 @@ class _SaveArticleDialogState extends State<SaveArticleDialog> {
       if (urls.isEmpty) {
         throw Exception('没有识别到链接');
       }
+      var queuedCount = 0;
+      final knownUrls = widget.queue.tasks
+          .map((task) => task.url.trim())
+          .toSet();
       for (final url in urls) {
+        if (knownUrls.contains(url.trim())) {
+          continue;
+        }
         widget.queue.enqueue(url);
+        knownUrls.add(url.trim());
+        queuedCount += 1;
+      }
+      if (queuedCount == 0) {
+        throw Exception('这些链接已经在收录队列中');
       }
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pop(urls.length);
+      Navigator.of(context).pop(queuedCount);
     } catch (error) {
       if (!mounted) {
         return;

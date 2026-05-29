@@ -1,6 +1,6 @@
 part of '../main.dart';
 
-enum _GalleryFilterKind { all, starred, uncategorized, category }
+enum _GalleryFilterKind { all, uncategorized, category }
 
 class _GalleryFilter {
   const _GalleryFilter._({
@@ -11,9 +11,6 @@ class _GalleryFilter {
 
   const _GalleryFilter.all()
     : this._(kind: _GalleryFilterKind.all, label: '全部');
-
-  const _GalleryFilter.starred()
-    : this._(kind: _GalleryFilterKind.starred, label: '星标');
 
   const _GalleryFilter.uncategorized()
     : this._(kind: _GalleryFilterKind.uncategorized, label: '未分类');
@@ -31,7 +28,6 @@ class _GalleryFilter {
 
   String get key => switch (kind) {
     _GalleryFilterKind.all => '__all__',
-    _GalleryFilterKind.starred => '__starred__',
     _GalleryFilterKind.uncategorized => '__uncategorized__',
     _GalleryFilterKind.category => category!.id,
   };
@@ -62,6 +58,10 @@ class _GalleryPageState extends State<GalleryPage> {
   final _articles = <SavedArticle>[];
   var _categories = <SavedCategory>[];
   _GalleryFilter _filter = const _GalleryFilter.all();
+  ArticleSort _sort = ArticleSort.publishedNewest;
+  Set<ArticleMediaType> _mediaTypes = <ArticleMediaType>{};
+  bool _starredOnly = false;
+  bool _isFilterExpanded = false;
   int _loadGeneration = 0;
   bool _isLoading = false;
   bool _hasMore = true;
@@ -88,32 +88,33 @@ class _GalleryPageState extends State<GalleryPage> {
     super.dispose();
   }
 
-  Future<List<SavedArticle>> _loadPage(_GalleryFilter filter, int offset) {
-    if (filter.kind == _GalleryFilterKind.category) {
-      return widget.store.listArticlesByCategoryPage(
-        filter.category!.id,
-        limit: _pageSize,
-        offset: offset,
-      );
-    }
-    if (filter.kind == _GalleryFilterKind.starred) {
-      return widget.store.listStarredArticlesPage(
-        limit: _pageSize,
-        offset: offset,
-      );
-    }
-    if (filter.kind == _GalleryFilterKind.uncategorized) {
-      return widget.store.listUncategorizedArticlesPage(
-        limit: _pageSize,
-        offset: offset,
-      );
-    }
-    return widget.store.listArticlesPage(limit: _pageSize, offset: offset);
+  Future<List<SavedArticle>> _loadPage(
+    _GalleryFilter filter,
+    int offset, {
+    required ArticleSort sort,
+    required Set<ArticleMediaType> mediaTypes,
+    required bool starredOnly,
+  }) {
+    return widget.store.searchArticlesPage(
+      '',
+      limit: _pageSize,
+      offset: offset,
+      categoryId: filter.kind == _GalleryFilterKind.category
+          ? filter.category!.id
+          : null,
+      uncategorizedOnly: filter.kind == _GalleryFilterKind.uncategorized,
+      starredOnly: starredOnly,
+      sort: sort,
+      mediaTypes: mediaTypes,
+    );
   }
 
   Future<void> _loadFirstPage() async {
     final generation = ++_loadGeneration;
     final filter = _filter;
+    final sort = _sort;
+    final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final starredOnly = _starredOnly;
     setState(() {
       _isLoading = true;
       _hasMore = true;
@@ -122,7 +123,13 @@ class _GalleryPageState extends State<GalleryPage> {
     try {
       final results = await Future.wait([
         widget.store.listCategories(),
-        _loadPage(filter, 0),
+        _loadPage(
+          filter,
+          0,
+          sort: sort,
+          mediaTypes: mediaTypes,
+          starredOnly: starredOnly,
+        ),
       ]);
       if (!mounted || generation != _loadGeneration) {
         return;
@@ -152,9 +159,18 @@ class _GalleryPageState extends State<GalleryPage> {
     }
     final generation = _loadGeneration;
     final filter = _filter;
+    final sort = _sort;
+    final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final starredOnly = _starredOnly;
     setState(() => _isLoading = true);
     try {
-      final page = await _loadPage(filter, _articles.length);
+      final page = await _loadPage(
+        filter,
+        _articles.length,
+        sort: sort,
+        mediaTypes: mediaTypes,
+        starredOnly: starredOnly,
+      );
       if (!mounted || generation != _loadGeneration) {
         return;
       }
@@ -186,27 +202,60 @@ class _GalleryPageState extends State<GalleryPage> {
     }
   }
 
-  void _selectFilter(_GalleryFilter filter) {
-    if (_filter.key == filter.key) {
-      return;
-    }
-    setState(() => _filter = filter);
+  void _applyFilters({
+    required _GalleryFilter filter,
+    required bool starredOnly,
+    required ArticleSort sort,
+    required Set<ArticleMediaType> mediaTypes,
+  }) {
+    setState(() {
+      _filter = filter;
+      _starredOnly = starredOnly;
+      _sort = sort;
+      _mediaTypes = mediaTypes;
+    });
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
     _loadFirstPage();
   }
 
+  void _applyFilterSettings(ArticleFilterSettings settings) {
+    _applyFilters(
+      filter: _filterFromSettings(settings),
+      starredOnly: settings.starredOnly,
+      sort: settings.sort,
+      mediaTypes: settings.mediaTypes,
+    );
+  }
+
+  void _resetFilters() {
+    _applyFilters(
+      filter: const _GalleryFilter.all(),
+      starredOnly: false,
+      sort: ArticleSort.publishedNewest,
+      mediaTypes: const {},
+    );
+  }
+
+  _GalleryFilter _filterFromSettings(ArticleFilterSettings settings) {
+    if (settings.categoryId != null) {
+      for (final category in _categories) {
+        if (category.id == settings.categoryId) {
+          return _GalleryFilter.category(category);
+        }
+      }
+    }
+    if (settings.uncategorizedOnly) {
+      return const _GalleryFilter.uncategorized();
+    }
+    return const _GalleryFilter.all();
+  }
+
   List<GalleryItem> get _items => buildGalleryItems(_articles);
 
   @override
   Widget build(BuildContext context) {
-    final filters = [
-      const _GalleryFilter.all(),
-      const _GalleryFilter.starred(),
-      const _GalleryFilter.uncategorized(),
-      ..._categories.map(_GalleryFilter.category),
-    ];
     final items = _items;
 
     return Scaffold(
@@ -217,90 +266,71 @@ class _GalleryPageState extends State<GalleryPage> {
       body: SafeArea(
         child: Column(
           children: [
-            SizedBox(
-              height: 48,
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-                scrollDirection: Axis.horizontal,
-                itemCount: filters.length,
-                separatorBuilder: (_, _) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final filter = filters[index];
-                  final selected = filter.key == _filter.key;
-                  return ChoiceChip(
-                    selected: selected,
-                    label: Text(filter.label),
-                    avatar: switch (filter.kind) {
-                      _GalleryFilterKind.starred => Icon(
-                        Icons.star_rounded,
-                        size: 16,
-                        color: selected ? Colors.white : _accent,
-                      ),
-                      _GalleryFilterKind.category => Icon(
-                        Icons.folder_rounded,
-                        size: 16,
-                        color: selected
-                            ? Colors.white
-                            : Color(filter.category!.color),
-                      ),
-                      _ => null,
-                    },
-                    showCheckmark: false,
-                    selectedColor: _accent,
-                    labelStyle: TextStyle(
-                      color: selected ? Colors.white : _ink,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    side: BorderSide(
-                      color: selected ? _accent : const Color(0xffdedfd7),
-                    ),
-                    onSelected: (_) => _selectFilter(filter),
-                  );
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: _FilterBar(
+                summary: _filterSummary,
+                expanded: _isFilterExpanded,
+                onTap: () {
+                  setState(() => _isFilterExpanded = !_isFilterExpanded);
                 },
               ),
             ),
             Expanded(
-              child: _errorText != null
-                  ? _EmptyMessage(
-                      icon: Icons.error_outline_rounded,
-                      text: '加载失败：$_errorText',
-                    )
-                  : items.isEmpty && _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : items.isEmpty
-                  ? const _EmptyMessage(
-                      icon: Icons.photo_library_outlined,
-                      text: '还没有可展示的图片或视频封面',
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _refresh,
-                      child: CustomScrollView(
-                        key: const PageStorageKey<String>(
-                          'offnote-gallery-scroll',
-                        ),
-                        controller: _scrollController,
-                        slivers: [
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
-                            sliver: SliverToBoxAdapter(
-                              child: _MasonryGalleryGrid(
-                                items: items,
-                                onTap: _openArticle,
-                              ),
-                            ),
+              child: _FilterOverlay(
+                expanded: _isFilterExpanded,
+                onDismiss: () => setState(() => _isFilterExpanded = false),
+                panel: ArticleFilterPanel(
+                  settings: _currentFilterSettings,
+                  categories: _categories,
+                  onChanged: _applyFilterSettings,
+                  onReset: _resetFilters,
+                  onCollapse: () {
+                    setState(() => _isFilterExpanded = false);
+                  },
+                ),
+                child: _errorText != null
+                    ? _EmptyMessage(
+                        icon: Icons.error_outline_rounded,
+                        text: '加载失败：$_errorText',
+                      )
+                    : items.isEmpty && _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : items.isEmpty
+                    ? const _EmptyMessage(
+                        icon: Icons.photo_library_outlined,
+                        text: '还没有可展示的图片或视频封面',
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _refresh,
+                        child: CustomScrollView(
+                          key: const PageStorageKey<String>(
+                            'offnote-gallery-scroll',
                           ),
-                          if (_hasMore)
-                            const SliverToBoxAdapter(
-                              child: Padding(
-                                padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Center(
-                                  child: CircularProgressIndicator(),
+                          controller: _scrollController,
+                          slivers: [
+                            SliverPadding(
+                              padding: const EdgeInsets.fromLTRB(12, 8, 12, 28),
+                              sliver: SliverToBoxAdapter(
+                                child: _MasonryGalleryGrid(
+                                  items: items,
+                                  onTap: _openArticle,
                                 ),
                               ),
                             ),
-                        ],
+                            if (_hasMore)
+                              const SliverToBoxAdapter(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 16),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
+              ),
             ),
           ],
         ),
@@ -311,16 +341,53 @@ class _GalleryPageState extends State<GalleryPage> {
   Future<void> _openArticle(SavedArticle article) async {
     final result = await Navigator.of(context).push<ArticleDetailResult>(
       MaterialPageRoute<ArticleDetailResult>(
-        builder: (_) => ArticleDetailPage(
-          article: article,
-          store: widget.store,
-        ),
+        builder: (_) =>
+            ArticleDetailPage(article: article, store: widget.store),
       ),
     );
     if (!result.needsListRefresh) {
       return;
     }
     widget.onChanged();
+  }
+
+  String get _filterSummary {
+    final parts = <String>[_sortLabel(_sort)];
+    if (_starredOnly) {
+      parts.add('星标');
+    }
+    if (_filter.kind != _GalleryFilterKind.all) {
+      parts.add(_filter.label);
+    }
+    if (_mediaTypes.length == 1) {
+      parts.add(_mediaTypeLabel(_mediaTypes.single));
+    }
+    return parts.join(' · ');
+  }
+
+  ArticleFilterSettings get _currentFilterSettings => ArticleFilterSettings(
+    sort: _sort,
+    starredOnly: _starredOnly,
+    uncategorizedOnly: _filter.kind == _GalleryFilterKind.uncategorized,
+    categoryId: _filter.kind == _GalleryFilterKind.category
+        ? _filter.category!.id
+        : null,
+    mediaTypes: _mediaTypes,
+  );
+
+  String _sortLabel(ArticleSort sort) {
+    return switch (sort) {
+      ArticleSort.publishedNewest => '发布时间',
+      ArticleSort.savedNewest => '最近保存',
+      ArticleSort.savedOldest => '最早保存',
+    };
+  }
+
+  String _mediaTypeLabel(ArticleMediaType mediaType) {
+    return switch (mediaType) {
+      ArticleMediaType.image => '图文',
+      ArticleMediaType.video => '视频',
+    };
   }
 }
 

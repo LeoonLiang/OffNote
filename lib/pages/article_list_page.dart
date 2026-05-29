@@ -32,6 +32,10 @@ class _ArticleListPageState extends State<ArticleListPage> {
   final _selectedIds = <String>{};
   final _articles = <SavedArticle>[];
   _GalleryFilter _filter = const _GalleryFilter.all();
+  ArticleSort _sort = ArticleSort.publishedNewest;
+  Set<ArticleMediaType> _mediaTypes = <ArticleMediaType>{};
+  bool _starredOnly = false;
+  bool _isFilterExpanded = false;
   var _categories = <SavedCategory>[];
   var _categoryNamesById = <String, String>{};
   Timer? _searchDebounce;
@@ -69,15 +73,21 @@ class _ArticleListPageState extends State<ArticleListPage> {
     super.dispose();
   }
 
-  bool get _showsFolderFilter => widget.category == null;
-
-  Future<List<SavedArticle>> _loadPage(_GalleryFilter filter, int offset) {
+  Future<List<SavedArticle>> _loadPage(
+    _GalleryFilter filter,
+    int offset, {
+    required ArticleSort sort,
+    required Set<ArticleMediaType> mediaTypes,
+    required bool starredOnly,
+  }) {
     final category = widget.category;
     if (category != null) {
       return widget.store.listArticlesByCategoryPage(
         category.id,
         limit: _pageSize,
         offset: offset,
+        sort: sort,
+        mediaTypes: mediaTypes,
       );
     }
     final query = _searchController.text.trim();
@@ -90,34 +100,31 @@ class _ArticleListPageState extends State<ArticleListPage> {
             ? filter.category!.id
             : null,
         uncategorizedOnly: filter.kind == _GalleryFilterKind.uncategorized,
-        starredOnly: filter.kind == _GalleryFilterKind.starred,
+        starredOnly: starredOnly,
+        sort: sort,
+        mediaTypes: mediaTypes,
       );
     }
-    if (filter.kind == _GalleryFilterKind.starred) {
-      return widget.store.listStarredArticlesPage(
-        limit: _pageSize,
-        offset: offset,
-      );
-    }
-    if (filter.kind == _GalleryFilterKind.category) {
-      return widget.store.listArticlesByCategoryPage(
-        filter.category!.id,
-        limit: _pageSize,
-        offset: offset,
-      );
-    }
-    if (filter.kind == _GalleryFilterKind.uncategorized) {
-      return widget.store.listUncategorizedArticlesPage(
-        limit: _pageSize,
-        offset: offset,
-      );
-    }
-    return widget.store.listArticlesPage(limit: _pageSize, offset: offset);
+    return widget.store.searchArticlesPage(
+      '',
+      limit: _pageSize,
+      offset: offset,
+      categoryId: filter.kind == _GalleryFilterKind.category
+          ? filter.category!.id
+          : null,
+      uncategorizedOnly: filter.kind == _GalleryFilterKind.uncategorized,
+      starredOnly: starredOnly,
+      sort: sort,
+      mediaTypes: mediaTypes,
+    );
   }
 
   Future<void> _loadFirstPage() async {
     final generation = ++_loadGeneration;
     final filter = _filter;
+    final sort = _sort;
+    final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final starredOnly = _starredOnly;
     setState(() {
       _isLoading = true;
       _hasMore = true;
@@ -126,7 +133,13 @@ class _ArticleListPageState extends State<ArticleListPage> {
     });
     try {
       final results = await Future.wait([
-        _loadPage(filter, 0),
+        _loadPage(
+          filter,
+          0,
+          sort: sort,
+          mediaTypes: mediaTypes,
+          starredOnly: starredOnly,
+        ),
         widget.store.listCategories(),
       ]);
       if (!mounted || generation != _loadGeneration) {
@@ -162,9 +175,18 @@ class _ArticleListPageState extends State<ArticleListPage> {
     }
     final generation = _loadGeneration;
     final filter = _filter;
+    final sort = _sort;
+    final mediaTypes = Set<ArticleMediaType>.of(_mediaTypes);
+    final starredOnly = _starredOnly;
     setState(() => _isLoading = true);
     try {
-      final page = await _loadPage(filter, _articles.length);
+      final page = await _loadPage(
+        filter,
+        _articles.length,
+        sort: sort,
+        mediaTypes: mediaTypes,
+        starredOnly: starredOnly,
+      );
       if (!mounted || generation != _loadGeneration) {
         return;
       }
@@ -203,15 +225,54 @@ class _ArticleListPageState extends State<ArticleListPage> {
     _searchDebounce = Timer(const Duration(milliseconds: 300), _loadFirstPage);
   }
 
-  void _selectFilter(_GalleryFilter filter) {
-    if (_filter.key == filter.key) {
-      return;
-    }
-    setState(() => _filter = filter);
+  void _applyFilters({
+    required _GalleryFilter filter,
+    required bool starredOnly,
+    required ArticleSort sort,
+    required Set<ArticleMediaType> mediaTypes,
+  }) {
+    setState(() {
+      _filter = filter;
+      _starredOnly = starredOnly;
+      _sort = sort;
+      _mediaTypes = mediaTypes;
+    });
     if (_scrollController.hasClients) {
       _scrollController.jumpTo(0);
     }
     _loadFirstPage();
+  }
+
+  void _applyFilterSettings(ArticleFilterSettings settings) {
+    _applyFilters(
+      filter: _filterFromSettings(settings),
+      starredOnly: settings.starredOnly,
+      sort: settings.sort,
+      mediaTypes: settings.mediaTypes,
+    );
+  }
+
+  void _resetFilters() {
+    _applyFilters(
+      filter: const _GalleryFilter.all(),
+      starredOnly: false,
+      sort: ArticleSort.publishedNewest,
+      mediaTypes: const {},
+    );
+  }
+
+  _GalleryFilter _filterFromSettings(ArticleFilterSettings settings) {
+    if (settings.categoryId != null) {
+      for (final category in _categories) {
+        if (category.id == settings.categoryId) {
+          return _GalleryFilter.category(category);
+        }
+      }
+    }
+    if (settings.uncategorizedOnly) {
+      return const _GalleryFilter.uncategorized();
+    }
+    return const _GalleryFilter.all();
   }
 
   void _toggleSelection(SavedArticle article) {
@@ -241,12 +302,6 @@ class _ArticleListPageState extends State<ArticleListPage> {
   @override
   Widget build(BuildContext context) {
     final hasQuery = _searchController.text.trim().isNotEmpty;
-    final filters = [
-      const _GalleryFilter.all(),
-      const _GalleryFilter.starred(),
-      const _GalleryFilter.uncategorized(),
-      ..._categories.map(_GalleryFilter.category),
-    ];
     return Scaffold(
       appBar: AppBar(
         leading: _isSelecting
@@ -313,98 +368,87 @@ class _ArticleListPageState extends State<ArticleListPage> {
                   onChanged: _onSearchChanged,
                 ),
               ),
-            if (_showsFolderFilter && !_isSelecting)
-              SizedBox(
-                height: 46,
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  scrollDirection: Axis.horizontal,
-                  itemCount: filters.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final filter = filters[index];
-                    final selected = filter.key == _filter.key;
-                    return ChoiceChip(
-                      selected: selected,
-                      label: Text(filter.label),
-                      avatar: switch (filter.kind) {
-                        _GalleryFilterKind.starred => Icon(
-                          Icons.star_rounded,
-                          size: 16,
-                          color: selected ? Colors.white : _accent,
-                        ),
-                        _GalleryFilterKind.category => Icon(
-                          Icons.folder_rounded,
-                          size: 16,
-                          color: selected
-                              ? Colors.white
-                              : Color(filter.category!.color),
-                        ),
-                        _ => null,
+            if (!_isSelecting)
+              Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: _FilterBar(
+                      summary: _filterSummary,
+                      expanded: _isFilterExpanded,
+                      onTap: () {
+                        setState(() => _isFilterExpanded = !_isFilterExpanded);
                       },
-                      showCheckmark: false,
-                      selectedColor: _accent,
-                      labelStyle: TextStyle(
-                        color: selected ? Colors.white : _ink,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      side: BorderSide(
-                        color: selected ? _accent : const Color(0xffdedfd7),
-                      ),
-                      onSelected: (_) => _selectFilter(filter),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                ],
               ),
             Expanded(
-              child: _errorText != null
-                  ? _EmptyMessage(
-                      icon: Icons.error_outline_rounded,
-                      text: '加载失败：$_errorText',
-                    )
-                  : _articles.isEmpty && _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _articles.isEmpty
-                  ? hasQuery
-                        ? const _EmptyMessage(
-                            icon: Icons.search_off_rounded,
-                            text: '没有找到相关内容',
-                          )
-                        : const _EmptyLibrary()
-                  : RefreshIndicator(
-                      onRefresh: _refresh,
-                      child: ListView.separated(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-                        itemCount: _articles.length + (_hasMore ? 1 : 0),
-                        separatorBuilder: (_, _) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          if (index >= _articles.length) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                              child: Center(child: CircularProgressIndicator()),
+              child: _FilterOverlay(
+                expanded: _isFilterExpanded && !_isSelecting,
+                onDismiss: () => setState(() => _isFilterExpanded = false),
+                panel: ArticleFilterPanel(
+                  settings: _currentFilterSettings,
+                  categories: _categories,
+                  showCategoryFilters: widget.category == null,
+                  onChanged: _applyFilterSettings,
+                  onReset: _resetFilters,
+                  onCollapse: () {
+                    setState(() => _isFilterExpanded = false);
+                  },
+                ),
+                child: _errorText != null
+                    ? _EmptyMessage(
+                        icon: Icons.error_outline_rounded,
+                        text: '加载失败：$_errorText',
+                      )
+                    : _articles.isEmpty && _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _articles.isEmpty
+                    ? hasQuery
+                          ? const _EmptyMessage(
+                              icon: Icons.search_off_rounded,
+                              text: '没有找到相关内容',
+                            )
+                          : const _EmptyLibrary()
+                    : RefreshIndicator(
+                        onRefresh: _refresh,
+                        child: ListView.separated(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                          itemCount: _articles.length + (_hasMore ? 1 : 0),
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            if (index >= _articles.length) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 12),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            }
+                            final article = _articles[index];
+                            return _ArticleTile(
+                              article: article,
+                              categoryLabel: articleCategoryLabel(
+                                article,
+                                _categoryNamesById,
+                              ),
+                              selected: _selectedIds.contains(article.id),
+                              selectionMode: _isSelecting,
+                              onTap: () => _isSelecting
+                                  ? _toggleSelection(article)
+                                  : _openArticle(article),
+                              onLongPress: () => _toggleSelection(article),
+                              onDelete: _isSelecting
+                                  ? null
+                                  : () => _confirmDelete(article),
                             );
-                          }
-                          final article = _articles[index];
-                          return _ArticleTile(
-                            article: article,
-                            categoryLabel: articleCategoryLabel(
-                              article,
-                              _categoryNamesById,
-                            ),
-                            selected: _selectedIds.contains(article.id),
-                            selectionMode: _isSelecting,
-                            onTap: () => _isSelecting
-                                ? _toggleSelection(article)
-                                : _openArticle(article),
-                            onLongPress: () => _toggleSelection(article),
-                            onDelete: _isSelecting
-                                ? null
-                                : () => _confirmDelete(article),
-                          );
-                        },
+                          },
+                        ),
                       ),
-                    ),
+              ),
             ),
           ],
         ),
@@ -584,5 +628,147 @@ class _ArticleListPageState extends State<ArticleListPage> {
     return _articles
         .where((article) => _selectedIds.contains(article.id))
         .toList(growable: false);
+  }
+
+  String get _filterSummary {
+    final parts = <String>[_sortLabel(_sort)];
+    if (_starredOnly) {
+      parts.add('星标');
+    }
+    if (widget.category == null && _filter.kind != _GalleryFilterKind.all) {
+      parts.add(_filter.label);
+    }
+    if (_mediaTypes.length == 1) {
+      parts.add(_mediaTypeLabel(_mediaTypes.single));
+    }
+    return parts.join(' · ');
+  }
+
+  ArticleFilterSettings get _currentFilterSettings => ArticleFilterSettings(
+    sort: _sort,
+    starredOnly: _starredOnly,
+    uncategorizedOnly: _filter.kind == _GalleryFilterKind.uncategorized,
+    categoryId: _filter.kind == _GalleryFilterKind.category
+        ? _filter.category!.id
+        : null,
+    mediaTypes: _mediaTypes,
+  );
+
+  String _sortLabel(ArticleSort sort) {
+    return switch (sort) {
+      ArticleSort.publishedNewest => '发布时间',
+      ArticleSort.savedNewest => '最近保存',
+      ArticleSort.savedOldest => '最早保存',
+    };
+  }
+
+  String _mediaTypeLabel(ArticleMediaType mediaType) {
+    return switch (mediaType) {
+      ArticleMediaType.image => '图文',
+      ArticleMediaType.video => '视频',
+    };
+  }
+}
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.summary,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final String summary;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xffdedfd7)),
+          ),
+          child: Row(
+            children: [
+              const Text(
+                '全部',
+                style: TextStyle(
+                  color: _ink,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                expanded ? Icons.keyboard_arrow_up_rounded : Icons.tune_rounded,
+                color: _muted,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  summary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterOverlay extends StatelessWidget {
+  const _FilterOverlay({
+    required this.expanded,
+    required this.panel,
+    required this.child,
+    required this.onDismiss,
+  });
+
+  final bool expanded;
+  final Widget panel;
+  final Widget child;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        child,
+        if (expanded)
+          Positioned.fill(
+            child: Column(
+              children: [
+                Material(color: Colors.transparent, child: panel),
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onDismiss,
+                    child: const ColoredBox(color: Color(0x33000000)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 }

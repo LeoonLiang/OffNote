@@ -14,6 +14,7 @@ import 'offnote_backup_service.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 import 'saved_tag.dart';
+import 'video_marker.dart';
 import 'xhs_offline_html.dart';
 
 class ArticleSnapshotStore {
@@ -302,6 +303,30 @@ class ArticleSnapshotStore {
 
   Future<void> updateArticleStarred(String articleId, bool isStarred) {
     return _database.updateArticleStarred(articleId, isStarred);
+  }
+
+  Future<VideoMarker> createVideoMarker({
+    required String articleId,
+    required Duration position,
+    required String note,
+  }) {
+    return _database.createVideoMarker(
+      articleId: articleId,
+      position: position,
+      note: note,
+    );
+  }
+
+  Future<List<VideoMarker>> listVideoMarkers(String articleId) {
+    return _database.listVideoMarkers(articleId);
+  }
+
+  Future<void> updateVideoMarker(VideoMarker marker) {
+    return _database.updateVideoMarker(marker);
+  }
+
+  Future<void> deleteVideoMarker(String id) {
+    return _database.deleteVideoMarker(id);
   }
 
   Future<ArticleStorageStats> loadStorageStats() async {

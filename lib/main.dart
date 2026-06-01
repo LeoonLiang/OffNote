@@ -35,6 +35,7 @@ import 'saved_category.dart';
 import 'saved_tag.dart';
 import 'selection.dart';
 import 'tag_editor_sheet.dart';
+import 'video_marker.dart';
 
 part 'theme.dart';
 part 'pages/home_page.dart';

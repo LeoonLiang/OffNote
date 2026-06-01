@@ -46,6 +46,76 @@ void main() {
         424,
       );
     });
+
+    test('keeps title preview padding independent from marker entry', () {
+      expect(calculateCollapsedContentLeadingPadding(false), 16);
+      expect(calculateCollapsedContentLeadingPadding(true), 16);
+    });
+
+    test('places marker entry at the right center of the video', () {
+      expect(calculateVideoMarkerEntryAlignment(), Alignment.centerRight);
+    });
+  });
+
+  group('video marker helpers', () {
+    test('formats marker positions under one hour', () {
+      expect(formatVideoMarkerPosition(Duration.zero), '00:00');
+      expect(
+        formatVideoMarkerPosition(const Duration(minutes: 1, seconds: 5)),
+        '01:05',
+      );
+      expect(
+        formatVideoMarkerPosition(
+          const Duration(minutes: 59, seconds: 59, milliseconds: 900),
+        ),
+        '59:59',
+      );
+    });
+
+    test('formats marker positions at one hour or longer', () {
+      expect(
+        formatVideoMarkerPosition(
+          const Duration(hours: 1, minutes: 2, seconds: 3),
+        ),
+        '1:02:03',
+      );
+    });
+
+    test('clamps marker seek positions to valid duration', () {
+      const duration = Duration(minutes: 2);
+
+      expect(
+        clampVideoMarkerSeekPosition(
+          const Duration(seconds: -3),
+          duration: duration,
+        ),
+        Duration.zero,
+      );
+      expect(
+        clampVideoMarkerSeekPosition(
+          const Duration(seconds: 30),
+          duration: duration,
+        ),
+        const Duration(seconds: 30),
+      );
+      expect(
+        clampVideoMarkerSeekPosition(
+          const Duration(minutes: 3),
+          duration: duration,
+        ),
+        duration,
+      );
+    });
+
+    test('does not clamp upper bound when duration is unknown', () {
+      expect(
+        clampVideoMarkerSeekPosition(
+          const Duration(minutes: 3),
+          duration: Duration.zero,
+        ),
+        const Duration(minutes: 3),
+      );
+    });
   });
 
   group('OffNoteVideoSource', () {

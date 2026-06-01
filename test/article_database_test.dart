@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:offnote/article_database.dart';
 import 'package:offnote/saved_article.dart';
 import 'package:offnote/saved_tag.dart';
+import 'package:offnote/video_marker.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -100,6 +101,107 @@ void main() {
       (article) => article.id == 'video',
     );
     expect(saved.mediaType, ArticleMediaType.video);
+  });
+
+  test('creates and lists video markers sorted by position', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+
+    await db.upsertArticle(
+      article(
+        id: 'video',
+        title: '视频笔记',
+        content: '本地视频',
+        mediaType: ArticleMediaType.video,
+      ),
+    );
+    await db.upsertVideoMarker(
+      VideoMarker(
+        id: 'late',
+        articleId: 'video',
+        position: const Duration(seconds: 40),
+        note: '后面的重点',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(3000),
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(3000),
+      ),
+    );
+    await db.upsertVideoMarker(
+      VideoMarker(
+        id: 'early',
+        articleId: 'video',
+        position: const Duration(seconds: 12),
+        note: '开头的重点',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(2000),
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+      ),
+    );
+
+    final markers = await db.listVideoMarkers('video');
+
+    expect(markers.map((marker) => marker.id), ['early', 'late']);
+    expect(markers.first.note, '开头的重点');
+  });
+
+  test('updates and deletes video markers', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+    final marker = VideoMarker(
+      id: 'm1',
+      articleId: 'video',
+      position: const Duration(seconds: 12),
+      note: '旧记录',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+    await db.upsertVideoMarker(marker);
+
+    await db.updateVideoMarker(
+      marker.copyWith(
+        position: const Duration(seconds: 18),
+        note: '新记录',
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+      ),
+    );
+
+    final updated = (await db.listVideoMarkers('video')).single;
+    expect(updated.position, const Duration(seconds: 18));
+    expect(updated.note, '新记录');
+    expect(updated.updatedAt, DateTime.fromMillisecondsSinceEpoch(2000));
+
+    await db.deleteVideoMarker('m1');
+
+    expect(await db.listVideoMarkers('video'), isEmpty);
+  });
+
+  test('deletes video markers for one article only', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+    final now = DateTime.fromMillisecondsSinceEpoch(1000);
+
+    await db.upsertVideoMarker(
+      VideoMarker(
+        id: 'a1-m1',
+        articleId: 'a1',
+        position: const Duration(seconds: 1),
+        note: 'A1',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    await db.upsertVideoMarker(
+      VideoMarker(
+        id: 'a2-m1',
+        articleId: 'a2',
+        position: const Duration(seconds: 2),
+        note: 'A2',
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+
+    await db.deleteVideoMarkersForArticle('a1');
+
+    expect(await db.listVideoMarkers('a1'), isEmpty);
+    expect((await db.listVideoMarkers('a2')).map((marker) => marker.id), [
+      'a2-m1',
+    ]);
   });
 
   test('persists image paths and remark', () async {

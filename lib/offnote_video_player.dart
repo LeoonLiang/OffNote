@@ -5,7 +5,15 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'video_marker.dart';
+
 const offNoteVideoAutoPlayOnOpen = true;
+
+typedef VideoMarkerCreateCallback =
+    Future<void> Function(Duration position, String note);
+typedef VideoMarkerUpdateCallback =
+    Future<void> Function(VideoMarker marker, Duration position, String note);
+typedef VideoMarkerDeleteCallback = Future<void> Function(VideoMarker marker);
 
 class OffNoteVideoSource {
   const OffNoteVideoSource({required this.videoUri, this.posterUri});
@@ -58,10 +66,57 @@ double calculateVideoPlayerHeight({
   return availableHeight * 0.53;
 }
 
+double calculateCollapsedContentLeadingPadding(bool hasMarkerEntry) {
+  return 16;
+}
+
+Alignment calculateVideoMarkerEntryAlignment() {
+  return Alignment.centerRight;
+}
+
+String formatVideoMarkerPosition(Duration position) {
+  final totalSeconds = position.inSeconds < 0 ? 0 : position.inSeconds;
+  final hours = totalSeconds ~/ 3600;
+  final minutes = (totalSeconds % 3600) ~/ 60;
+  final seconds = totalSeconds % 60;
+  final minuteText = minutes.toString().padLeft(2, '0');
+  final secondText = seconds.toString().padLeft(2, '0');
+  if (hours > 0) {
+    return '$hours:$minuteText:$secondText';
+  }
+  return '$minuteText:$secondText';
+}
+
+Duration clampVideoMarkerSeekPosition(
+  Duration position, {
+  required Duration duration,
+}) {
+  if (position < Duration.zero) {
+    return Duration.zero;
+  }
+  if (duration > Duration.zero && position > duration) {
+    return duration;
+  }
+  return position;
+}
+
 class OffNoteVideoPlayer extends StatefulWidget {
-  const OffNoteVideoPlayer({super.key, required this.source});
+  const OffNoteVideoPlayer({
+    super.key,
+    required this.source,
+    this.markers = const [],
+    this.hasCollapsedContentPreview = false,
+    this.onCreateMarker,
+    this.onUpdateMarker,
+    this.onDeleteMarker,
+  });
 
   final OffNoteVideoSource source;
+  final List<VideoMarker> markers;
+  final bool hasCollapsedContentPreview;
+  final VideoMarkerCreateCallback? onCreateMarker;
+  final VideoMarkerUpdateCallback? onUpdateMarker;
+  final VideoMarkerDeleteCallback? onDeleteMarker;
 
   @override
   State<OffNoteVideoPlayer> createState() => _OffNoteVideoPlayerState();
@@ -71,10 +126,21 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
   late final Player _player;
   late final VideoController _controller;
   final _subscriptions = <StreamSubscription<Object?>>[];
+  final _markerOverlayRevision = ValueNotifier(0);
   double _restoreRate = 1;
   bool _isFastForwarding = false;
+  bool _isMarkerPanelOpen = false;
+  bool _isSavingMarker = false;
+  VideoMarker? _editingMarker;
+  Duration? _editingPosition;
+  TextEditingController? _markerEditorController;
   Duration? _seekStartPosition;
   double? _seekOffset;
+
+  bool get _hasMarkerActions =>
+      widget.onCreateMarker != null &&
+      widget.onUpdateMarker != null &&
+      widget.onDeleteMarker != null;
 
   @override
   void initState() {
@@ -99,6 +165,8 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
+    _markerEditorController?.dispose();
+    _markerOverlayRevision.dispose();
     _player.dispose();
     super.dispose();
   }
@@ -150,7 +218,7 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
                     height: playerHeight,
                     fit: BoxFit.contain,
                     fill: Colors.black,
-                    controls: AdaptiveVideoControls,
+                    controls: _buildVideoControls,
                   ),
                 ),
               ),
@@ -215,11 +283,96 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
                   left: 14,
                   child: _SeekIndicator(offset: _seekOffset!),
                 ),
+              if (_hasMarkerActions) _buildMarkerOverlayLayer(context),
             ],
           ),
         );
       },
     );
+  }
+
+  Widget _buildVideoControls(VideoState state) {
+    return Builder(
+      builder: (context) {
+        if (!isFullscreen(context)) {
+          return AdaptiveVideoControls(state);
+        }
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            AdaptiveVideoControls(state),
+            if (_hasMarkerActions) _buildMarkerOverlayLayer(context),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMarkerOverlayLayer(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: _markerOverlayRevision,
+      builder: (context, _, _) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Align(
+              alignment: calculateVideoMarkerEntryAlignment(),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: _MarkerPanelButton(
+                  isOpen: _isMarkerPanelOpen,
+                  markerCount: widget.markers.length,
+                  onTap: _toggleMarkerPanel,
+                ),
+              ),
+            ),
+            if (_isMarkerPanelOpen)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _closeMarkerPanel,
+                ),
+              ),
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              top: 0,
+              bottom: 0,
+              right: _isMarkerPanelOpen ? 0 : -_markerPanelWidth(context),
+              width: _markerPanelWidth(context),
+              child: _MarkerTimelinePanel(
+                markers: widget.markers,
+                isSaving: _isSavingMarker,
+                editorController: _markerEditorController,
+                editingPosition: _editingPosition,
+                editingMarker: _editingMarker,
+                onAddCurrent: _addMarkerAtCurrentPosition,
+                onSaveDraft: _saveMarkerDraft,
+                onCancelDraft: _cancelMarkerDraft,
+                onTapMarker: _seekToMarker,
+                onEditMarker: _editMarker,
+                onDeleteMarker: _deleteMarker,
+                onClose: _closeMarkerPanel,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _toggleMarkerPanel() {
+    setState(() => _isMarkerPanelOpen = !_isMarkerPanelOpen);
+    _bumpMarkerOverlay();
+  }
+
+  void _closeMarkerPanel() {
+    setState(() => _isMarkerPanelOpen = false);
+    _bumpMarkerOverlay();
+  }
+
+  void _bumpMarkerOverlay() {
+    _markerOverlayRevision.value++;
   }
 
   Future<void> _setFastForwarding(bool value) async {
@@ -232,6 +385,94 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
       await _player.setRate(3);
     } else {
       await _player.setRate(_restoreRate);
+    }
+  }
+
+  double _markerPanelWidth(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return width < 520 ? width * 0.78 : 320;
+  }
+
+  void _addMarkerAtCurrentPosition() {
+    _startMarkerDraft(position: _player.state.position);
+  }
+
+  void _editMarker(VideoMarker marker) {
+    _startMarkerDraft(marker: marker, position: marker.position);
+  }
+
+  void _startMarkerDraft({VideoMarker? marker, required Duration position}) {
+    _markerEditorController?.dispose();
+    setState(() {
+      _editingMarker = marker;
+      _editingPosition = position;
+      _markerEditorController = TextEditingController(text: marker?.note ?? '');
+    });
+    _bumpMarkerOverlay();
+  }
+
+  Future<void> _saveMarkerDraft() async {
+    final controller = _markerEditorController;
+    final position = _editingPosition;
+    final marker = _editingMarker;
+    if (controller == null || position == null) {
+      return;
+    }
+    final note = controller.text.trim();
+    if (note.isEmpty) {
+      return;
+    }
+    await _withMarkerSaving(() async {
+      if (marker == null) {
+        await widget.onCreateMarker!(position, note);
+      } else {
+        await widget.onUpdateMarker!(marker, position, note);
+      }
+    });
+    _cancelMarkerDraft();
+  }
+
+  void _cancelMarkerDraft() {
+    _markerEditorController?.dispose();
+    setState(() {
+      _editingMarker = null;
+      _editingPosition = null;
+      _markerEditorController = null;
+    });
+    _bumpMarkerOverlay();
+  }
+
+  Future<void> _deleteMarker(VideoMarker marker) async {
+    if (widget.onDeleteMarker == null) {
+      return;
+    }
+    await _withMarkerSaving(() async {
+      await widget.onDeleteMarker!(marker);
+    });
+  }
+
+  Future<void> _seekToMarker(VideoMarker marker) async {
+    final target = clampVideoMarkerSeekPosition(
+      marker.position,
+      duration: _player.state.duration,
+    );
+    await _player.seek(target);
+    await _player.play();
+  }
+
+  Future<void> _withMarkerSaving(Future<void> Function() action) async {
+    if (_isSavingMarker) {
+      return;
+    }
+    setState(() => _isSavingMarker = true);
+    _bumpMarkerOverlay();
+    try {
+      await action();
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingMarker = false);
+        _bumpMarkerOverlay();
+      }
     }
   }
 }
@@ -254,6 +495,354 @@ class _FastForwardBadge extends StatelessWidget {
             color: Colors.white,
             fontSize: 13,
             fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkerPanelButton extends StatelessWidget {
+  const _MarkerPanelButton({
+    required this.isOpen,
+    required this.markerCount,
+    required this.onTap,
+  });
+
+  final bool isOpen;
+  final int markerCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: isOpen
+                ? Colors.white.withValues(alpha: 0.94)
+                : Colors.black.withValues(alpha: 0.58),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.view_timeline_rounded,
+                  color: isOpen ? Colors.black87 : Colors.white,
+                  size: 18,
+                ),
+                if (markerCount > 0) ...[
+                  const SizedBox(width: 5),
+                  Text(
+                    markerCount.toString(),
+                    style: TextStyle(
+                      color: isOpen ? Colors.black87 : Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkerTimelinePanel extends StatelessWidget {
+  const _MarkerTimelinePanel({
+    required this.markers,
+    required this.isSaving,
+    required this.editorController,
+    required this.editingPosition,
+    required this.editingMarker,
+    required this.onAddCurrent,
+    required this.onSaveDraft,
+    required this.onCancelDraft,
+    required this.onTapMarker,
+    required this.onEditMarker,
+    required this.onDeleteMarker,
+    required this.onClose,
+  });
+
+  final List<VideoMarker> markers;
+  final bool isSaving;
+  final TextEditingController? editorController;
+  final Duration? editingPosition;
+  final VideoMarker? editingMarker;
+  final VoidCallback onAddCurrent;
+  final VoidCallback onSaveDraft;
+  final VoidCallback onCancelDraft;
+  final ValueChanged<VideoMarker> onTapMarker;
+  final ValueChanged<VideoMarker> onEditMarker;
+  final ValueChanged<VideoMarker> onDeleteMarker;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final sorted = [...markers]
+      ..sort((a, b) {
+        final byPosition = a.position.compareTo(b.position);
+        if (byPosition != 0) {
+          return byPosition;
+        }
+        return a.createdAt.compareTo(b.createdAt);
+      });
+
+    return Material(
+      color: Colors.black.withValues(alpha: 0.78),
+      child: SafeArea(
+        left: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 8, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      '时间点',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onClose,
+                    tooltip: '关闭',
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+              child: FilledButton.icon(
+                onPressed: isSaving || editorController != null
+                    ? null
+                    : onAddCurrent,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: Text(isSaving ? '保存中' : '标记当前时间'),
+              ),
+            ),
+            if (editorController != null && editingPosition != null)
+              _MarkerInlineEditor(
+                controller: editorController!,
+                position: editingPosition!,
+                isEditingExisting: editingMarker != null,
+                isSaving: isSaving,
+                onSave: onSaveDraft,
+                onCancel: onCancelDraft,
+              ),
+            Expanded(
+              child: sorted.isEmpty
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          '还没有时间点',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white60),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
+                      itemCount: sorted.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 6),
+                      itemBuilder: (context, index) {
+                        final marker = sorted[index];
+                        return _MarkerTimelineTile(
+                          marker: marker,
+                          onTap: () => onTapMarker(marker),
+                          onEdit: () => onEditMarker(marker),
+                          onDelete: () => onDeleteMarker(marker),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkerTimelineTile extends StatelessWidget {
+  const _MarkerTimelineTile({
+    required this.marker,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final VideoMarker marker;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 9, 4, 9),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 48,
+                child: Text(
+                  formatVideoMarkerPosition(marker.position),
+                  style: const TextStyle(
+                    color: Color(0xff9ad8ff),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  marker.note,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+              PopupMenuButton<String>(
+                tooltip: '更多',
+                icon: const Icon(
+                  Icons.more_vert_rounded,
+                  color: Colors.white70,
+                  size: 19,
+                ),
+                color: Colors.white,
+                onSelected: (value) {
+                  if (value == 'edit') {
+                    onEdit();
+                  } else if (value == 'delete') {
+                    onDelete();
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'edit', child: Text('编辑')),
+                  PopupMenuItem(value: 'delete', child: Text('删除')),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarkerInlineEditor extends StatelessWidget {
+  const _MarkerInlineEditor({
+    required this.controller,
+    required this.position,
+    required this.isEditingExisting,
+    required this.isSaving,
+    required this.onSave,
+    required this.onCancel,
+  });
+
+  final TextEditingController controller;
+  final Duration position;
+  final bool isEditingExisting;
+  final bool isSaving;
+  final VoidCallback onSave;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${isEditingExisting ? '编辑' : '新增'} ${formatVideoMarkerPosition(position)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: controller,
+                minLines: 3,
+                maxLines: 5,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  hintText: '写下这个时间点值得学习的地方',
+                  hintStyle: const TextStyle(color: Colors.white54),
+                  filled: true,
+                  fillColor: Colors.black.withValues(alpha: 0.24),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xff9ad8ff)),
+                  ),
+                  contentPadding: const EdgeInsets.all(10),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: isSaving ? null : onCancel,
+                    child: const Text('取消'),
+                  ),
+                  const SizedBox(width: 6),
+                  FilledButton(
+                    onPressed: isSaving ? null : onSave,
+                    child: Text(isSaving ? '保存中' : '保存'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

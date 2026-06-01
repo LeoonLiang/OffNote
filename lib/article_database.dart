@@ -7,6 +7,7 @@ import 'package:sqflite/sqflite.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
 import 'saved_tag.dart';
+import 'video_marker.dart';
 
 enum ArticleSort {
   publishedNewest('published_at DESC'),
@@ -50,7 +51,7 @@ class ArticleDatabase {
     final database = await (_databaseFactory ?? databaseFactory).openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 9,
+        version: 10,
         onCreate: (db, version) async {
           await _createSchema(db);
           await _tryCreateArticleFtsSchema(db);
@@ -96,6 +97,9 @@ class ArticleDatabase {
           }
           if (oldVersion < 9) {
             await _createTagSchema(db);
+          }
+          if (oldVersion < 10) {
+            await _createVideoMarkerSchema(db);
           }
         },
       ),
@@ -148,6 +152,7 @@ class ArticleDatabase {
       'CREATE INDEX categories_created_at_idx ON categories(created_at)',
     );
     await _createTagSchema(db);
+    await _createVideoMarkerSchema(db);
   }
 
   Future<void> _createTagSchema(DatabaseExecutor db) async {
@@ -175,6 +180,22 @@ class ArticleDatabase {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS article_tags_tag_id_idx ON article_tags(tag_id)',
+    );
+  }
+
+  Future<void> _createVideoMarkerSchema(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS video_markers (
+        id TEXT PRIMARY KEY,
+        article_id TEXT NOT NULL,
+        position_ms INTEGER NOT NULL,
+        note TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS video_markers_article_position_idx ON video_markers(article_id, position_ms, created_at)',
     );
   }
 
@@ -978,6 +999,68 @@ class ArticleDatabase {
         }
       }
     });
+  }
+
+  Future<VideoMarker> createVideoMarker({
+    required String articleId,
+    required Duration position,
+    required String note,
+  }) async {
+    final now = DateTime.now();
+    final marker = VideoMarker(
+      id: now.microsecondsSinceEpoch.toString(),
+      articleId: articleId,
+      position: position,
+      note: note.trim(),
+      createdAt: now,
+      updatedAt: now,
+    );
+    await upsertVideoMarker(marker);
+    return marker;
+  }
+
+  Future<void> upsertVideoMarker(VideoMarker marker) async {
+    final db = await _db;
+    await db.insert(
+      'video_markers',
+      marker.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<VideoMarker>> listVideoMarkers(String articleId) async {
+    final db = await _db;
+    final rows = await db.query(
+      'video_markers',
+      where: 'article_id = ?',
+      whereArgs: [articleId],
+      orderBy: 'position_ms ASC, created_at ASC',
+    );
+    return rows.map(VideoMarker.fromMap).toList(growable: false);
+  }
+
+  Future<void> updateVideoMarker(VideoMarker marker) async {
+    final db = await _db;
+    await db.update(
+      'video_markers',
+      marker.toMap(),
+      where: 'id = ?',
+      whereArgs: [marker.id],
+    );
+  }
+
+  Future<void> deleteVideoMarker(String id) async {
+    final db = await _db;
+    await db.delete('video_markers', where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> deleteVideoMarkersForArticle(String articleId) async {
+    final db = await _db;
+    await db.delete(
+      'video_markers',
+      where: 'article_id = ?',
+      whereArgs: [articleId],
+    );
   }
 
   Future<void> upsertArticleTagAssignment(

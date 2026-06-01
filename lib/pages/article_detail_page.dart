@@ -21,6 +21,7 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
   late final Future<OffNoteVideoSource?> _videoSourceFuture;
   late SavedArticle _article = widget.article;
   var _articleTags = <SavedTag>[];
+  var _videoMarkers = <VideoMarker>[];
   bool _hasListChanges = false;
 
   @override
@@ -40,6 +41,9 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       ..loadFile(widget.article.htmlPath);
     _videoSourceFuture = _loadVideoSource();
     _loadArticleTags();
+    if (widget.article.mediaType == ArticleMediaType.video) {
+      _loadVideoMarkers();
+    }
   }
 
   @override
@@ -112,7 +116,14 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
           }
           return WebViewWidget(controller: _controller);
         }
-        return _VideoArticleView(article: _article, source: source);
+        return _VideoArticleView(
+          article: _article,
+          source: source,
+          markers: _videoMarkers,
+          onCreateMarker: _createVideoMarker,
+          onUpdateMarker: _updateVideoMarker,
+          onDeleteMarker: _deleteVideoMarker,
+        );
       },
     );
   }
@@ -128,6 +139,76 @@ class _ArticleDetailPageState extends State<ArticleDetailPage> {
       return;
     }
     setState(() => _articleTags = tags);
+  }
+
+  Future<void> _loadVideoMarkers() async {
+    final markers = await widget.store.listVideoMarkers(_article.id);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _videoMarkers = markers);
+  }
+
+  Future<void> _createVideoMarker(Duration position, String note) async {
+    await _runVideoMarkerMutation(() async {
+      final marker = await widget.store.createVideoMarker(
+        articleId: _article.id,
+        position: position,
+        note: note,
+      );
+      setState(() {
+        _videoMarkers = [..._videoMarkers, marker]
+          ..sort((a, b) => a.position.compareTo(b.position));
+      });
+    });
+  }
+
+  Future<void> _updateVideoMarker(
+    VideoMarker marker,
+    Duration position,
+    String note,
+  ) async {
+    await _runVideoMarkerMutation(() async {
+      final updated = marker.copyWith(
+        position: position,
+        note: note,
+        updatedAt: DateTime.now(),
+      );
+      await widget.store.updateVideoMarker(updated);
+      setState(() {
+        _videoMarkers =
+            _videoMarkers
+                .map(
+                  (existing) => existing.id == updated.id ? updated : existing,
+                )
+                .toList(growable: false)
+              ..sort((a, b) => a.position.compareTo(b.position));
+      });
+    });
+  }
+
+  Future<void> _deleteVideoMarker(VideoMarker marker) async {
+    await _runVideoMarkerMutation(() async {
+      await widget.store.deleteVideoMarker(marker.id);
+      setState(() {
+        _videoMarkers = _videoMarkers
+            .where((existing) => existing.id != marker.id)
+            .toList(growable: false);
+      });
+    });
+  }
+
+  Future<void> _runVideoMarkerMutation(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('时间点保存失败')));
+    }
   }
 
   Future<void> _chooseCategory() async {
@@ -592,10 +673,21 @@ class _FloatingDetailAction extends StatelessWidget {
 }
 
 class _VideoArticleView extends StatefulWidget {
-  const _VideoArticleView({required this.article, required this.source});
+  const _VideoArticleView({
+    required this.article,
+    required this.source,
+    required this.markers,
+    required this.onCreateMarker,
+    required this.onUpdateMarker,
+    required this.onDeleteMarker,
+  });
 
   final SavedArticle article;
   final OffNoteVideoSource source;
+  final List<VideoMarker> markers;
+  final VideoMarkerCreateCallback onCreateMarker;
+  final VideoMarkerUpdateCallback onUpdateMarker;
+  final VideoMarkerDeleteCallback onDeleteMarker;
 
   @override
   State<_VideoArticleView> createState() => _VideoArticleViewState();
@@ -625,7 +717,14 @@ class _VideoArticleViewState extends State<_VideoArticleView> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  OffNoteVideoPlayer(source: widget.source),
+                  OffNoteVideoPlayer(
+                    source: widget.source,
+                    markers: widget.markers,
+                    hasCollapsedContentPreview: !_isContentExpanded,
+                    onCreateMarker: widget.onCreateMarker,
+                    onUpdateMarker: widget.onUpdateMarker,
+                    onDeleteMarker: widget.onDeleteMarker,
+                  ),
                   if (!_isContentExpanded)
                     Positioned(
                       left: 0,
@@ -633,6 +732,7 @@ class _VideoArticleViewState extends State<_VideoArticleView> {
                       bottom: 46,
                       child: _CollapsedContentPreview(
                         article: widget.article,
+                        hasMarkerEntry: true,
                         onExpandTap: () {
                           setState(() => _isContentExpanded = true);
                         },
@@ -679,10 +779,12 @@ class _VideoArticleViewState extends State<_VideoArticleView> {
 class _CollapsedContentPreview extends StatelessWidget {
   const _CollapsedContentPreview({
     required this.article,
+    required this.hasMarkerEntry,
     required this.onExpandTap,
   });
 
   final SavedArticle article;
+  final bool hasMarkerEntry;
   final VoidCallback onExpandTap;
 
   static TextSpan _buildTextWithTopics(String text, TextStyle baseStyle) {
@@ -722,7 +824,12 @@ class _CollapsedContentPreview extends StatelessWidget {
       onTap: onExpandTap,
       child: Container(
         color: Colors.transparent,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: EdgeInsets.fromLTRB(
+          calculateCollapsedContentLeadingPadding(hasMarkerEntry),
+          8,
+          16,
+          0,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [

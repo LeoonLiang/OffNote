@@ -45,6 +45,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       onTap: _openStorageStats,
                     ),
                     _SettingsTile(
+                      icon: Icons.terrain_rounded,
+                      title: '实时高度表',
+                      subtitle: '全屏高度表、气压和位置',
+                      onTap: _openAltitudePage,
+                    ),
+                    _SettingsTile(
                       icon: Icons.backup_rounded,
                       title: '备份与恢复',
                       subtitle: '创建、恢复或删除本机备份',
@@ -55,6 +61,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       title: '标签管理',
                       subtitle: '修改或删除已有标签',
                       onTap: _openTagManager,
+                    ),
+                    _SettingsTile(
+                      icon: Icons.folder_rounded,
+                      title: '分类管理',
+                      subtitle: '管理文章分类文件夹',
+                      onTap: _openCategoryManager,
                     ),
                     _SettingsTile(
                       icon: Icons.system_update_alt_rounded,
@@ -119,6 +131,15 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _openAltitudePage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => const AltitudePage(),
+      ),
+    );
+  }
+
   Future<void> _openSaveQueueFromSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -141,6 +162,18 @@ class _SettingsPageState extends State<SettingsPage> {
       MaterialPageRoute<void>(
         builder: (_) =>
             TagManagerPage(store: widget.store, onChanged: widget.onChanged),
+      ),
+    );
+  }
+
+  Future<void> _openCategoryManager() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CategoryPage(
+          store: widget.store,
+          onChanged: widget.onChanged,
+          refreshToken: 0,
+        ),
       ),
     );
   }

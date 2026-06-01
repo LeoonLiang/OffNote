@@ -230,11 +230,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         actions: sharedActions,
         refreshToken: _refreshTick,
       ),
-      CategoryPage(
-        store: _store,
-        onChanged: _refresh,
-        refreshToken: _refreshTick,
-      ),
       SettingsPage(store: _store, queue: _saveQueue, onChanged: _refresh),
     ];
 
@@ -272,15 +267,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               _NavItem(
                 selected: _index == 2,
-                icon: Icons.folder_rounded,
-                label: '分类',
-                onTap: () => setState(() => _index = 2),
-              ),
-              _NavItem(
-                selected: _index == 3,
                 icon: Icons.settings_rounded,
                 label: '设置',
-                onTap: () => setState(() => _index = 3),
+                onTap: () => setState(() => _index = 2),
               ),
             ],
           ),

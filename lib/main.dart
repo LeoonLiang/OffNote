@@ -1,14 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:dio/dio.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -42,6 +48,7 @@ part 'pages/home_page.dart';
 part 'save_article_dialog.dart';
 part 'pages/article_list_page.dart';
 part 'pages/gallery_page.dart';
+part 'pages/altitude_page.dart';
 part 'pages/category_page.dart';
 part 'pages/article_detail_page.dart';
 part 'pages/storage_stats_page.dart';

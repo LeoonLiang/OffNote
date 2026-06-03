@@ -116,6 +116,50 @@ void main() {
         const Duration(minutes: 3),
       );
     });
+
+    test('shows hour field only for videos at one hour or longer', () {
+      expect(
+        shouldShowVideoMarkerHourField(
+          const Duration(minutes: 59, seconds: 59),
+        ),
+        isFalse,
+      );
+      expect(shouldShowVideoMarkerHourField(const Duration(hours: 1)), isTrue);
+    });
+
+    test('parses marker position fields into duration', () {
+      expect(
+        parseVideoMarkerPositionFields(minutes: '02', seconds: '03'),
+        const Duration(minutes: 2, seconds: 3),
+      );
+      expect(
+        parseVideoMarkerPositionFields(
+          hours: '1',
+          minutes: '02',
+          seconds: '03',
+        ),
+        const Duration(hours: 1, minutes: 2, seconds: 3),
+      );
+    });
+
+    test('rejects invalid marker position fields', () {
+      expect(
+        parseVideoMarkerPositionFields(minutes: '', seconds: '03'),
+        isNull,
+      );
+      expect(
+        parseVideoMarkerPositionFields(minutes: '02', seconds: '60'),
+        isNull,
+      );
+      expect(
+        parseVideoMarkerPositionFields(
+          hours: '-1',
+          minutes: '02',
+          seconds: '03',
+        ),
+        isNull,
+      );
+    });
   });
 
   group('OffNoteVideoSource', () {

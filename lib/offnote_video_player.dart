@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -87,6 +88,40 @@ String formatVideoMarkerPosition(Duration position) {
   return '$minuteText:$secondText';
 }
 
+bool shouldShowVideoMarkerHourField(Duration videoDuration) {
+  return videoDuration.inHours > 0;
+}
+
+Duration? parseVideoMarkerPositionFields({
+  String? hours,
+  required String minutes,
+  required String seconds,
+}) {
+  final hourText = hours?.trim();
+  final minuteText = minutes.trim();
+  final secondText = seconds.trim();
+  final parsedHours = hourText == null || hourText.isEmpty
+      ? 0
+      : int.tryParse(hourText);
+  final parsedMinutes = int.tryParse(minuteText);
+  final parsedSeconds = int.tryParse(secondText);
+  if (parsedHours == null || parsedMinutes == null || parsedSeconds == null) {
+    return null;
+  }
+  if (parsedHours < 0 ||
+      parsedMinutes < 0 ||
+      parsedMinutes > 59 ||
+      parsedSeconds < 0 ||
+      parsedSeconds > 59) {
+    return null;
+  }
+  return Duration(
+    hours: parsedHours,
+    minutes: parsedMinutes,
+    seconds: parsedSeconds,
+  );
+}
+
 Duration clampVideoMarkerSeekPosition(
   Duration position, {
   required Duration duration,
@@ -153,6 +188,7 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
           _restoreRate = value;
         }
       }),
+      _player.stream.duration.listen((_) => _bumpMarkerOverlay()),
     ]);
     _player.open(
       Media(widget.source.videoUri),
@@ -346,6 +382,9 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
                 editorController: _markerEditorController,
                 editingPosition: _editingPosition,
                 editingMarker: _editingMarker,
+                showHourField:
+                    shouldShowVideoMarkerHourField(_player.state.duration) ||
+                    ((_editingPosition?.inHours ?? 0) > 0),
                 onAddCurrent: _addMarkerAtCurrentPosition,
                 onSaveDraft: _saveMarkerDraft,
                 onCancelDraft: _cancelMarkerDraft,
@@ -411,11 +450,10 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
     _bumpMarkerOverlay();
   }
 
-  Future<void> _saveMarkerDraft() async {
+  Future<void> _saveMarkerDraft(Duration position) async {
     final controller = _markerEditorController;
-    final position = _editingPosition;
     final marker = _editingMarker;
-    if (controller == null || position == null) {
+    if (controller == null) {
       return;
     }
     final note = controller.text.trim();
@@ -565,6 +603,7 @@ class _MarkerTimelinePanel extends StatelessWidget {
     required this.editorController,
     required this.editingPosition,
     required this.editingMarker,
+    required this.showHourField,
     required this.onAddCurrent,
     required this.onSaveDraft,
     required this.onCancelDraft,
@@ -579,8 +618,9 @@ class _MarkerTimelinePanel extends StatelessWidget {
   final TextEditingController? editorController;
   final Duration? editingPosition;
   final VideoMarker? editingMarker;
+  final bool showHourField;
   final VoidCallback onAddCurrent;
-  final VoidCallback onSaveDraft;
+  final ValueChanged<Duration> onSaveDraft;
   final VoidCallback onCancelDraft;
   final ValueChanged<VideoMarker> onTapMarker;
   final ValueChanged<VideoMarker> onEditMarker;
@@ -642,8 +682,12 @@ class _MarkerTimelinePanel extends StatelessWidget {
             ),
             if (editorController != null && editingPosition != null)
               _MarkerInlineEditor(
+                key: ValueKey(
+                  '${editingMarker?.id ?? 'new'}-${editingPosition!.inMilliseconds}-$showHourField',
+                ),
                 controller: editorController!,
                 position: editingPosition!,
+                showHourField: showHourField,
                 isEditingExisting: editingMarker != null,
                 isSaving: isSaving,
                 onSave: onSaveDraft,
@@ -761,10 +805,12 @@ class _MarkerTimelineTile extends StatelessWidget {
   }
 }
 
-class _MarkerInlineEditor extends StatelessWidget {
+class _MarkerInlineEditor extends StatefulWidget {
   const _MarkerInlineEditor({
+    super.key,
     required this.controller,
     required this.position,
+    required this.showHourField,
     required this.isEditingExisting,
     required this.isSaving,
     required this.onSave,
@@ -773,10 +819,61 @@ class _MarkerInlineEditor extends StatelessWidget {
 
   final TextEditingController controller;
   final Duration position;
+  final bool showHourField;
   final bool isEditingExisting;
   final bool isSaving;
-  final VoidCallback onSave;
+  final ValueChanged<Duration> onSave;
   final VoidCallback onCancel;
+
+  @override
+  State<_MarkerInlineEditor> createState() => _MarkerInlineEditorState();
+}
+
+class _MarkerInlineEditorState extends State<_MarkerInlineEditor> {
+  late final TextEditingController _hourController;
+  late final TextEditingController _minuteController;
+  late final TextEditingController _secondController;
+  String? _positionError;
+
+  @override
+  void initState() {
+    super.initState();
+    final totalSeconds = widget.position.inSeconds < 0
+        ? 0
+        : widget.position.inSeconds;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    _hourController = TextEditingController(text: hours.toString());
+    _minuteController = TextEditingController(
+      text: minutes.toString().padLeft(2, '0'),
+    );
+    _secondController = TextEditingController(
+      text: seconds.toString().padLeft(2, '0'),
+    );
+  }
+
+  @override
+  void dispose() {
+    _hourController.dispose();
+    _minuteController.dispose();
+    _secondController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final position = parseVideoMarkerPositionFields(
+      hours: widget.showHourField ? _hourController.text : null,
+      minutes: _minuteController.text,
+      seconds: _secondController.text,
+    );
+    if (position == null) {
+      setState(() => _positionError = '请输入有效时间');
+      return;
+    }
+    setState(() => _positionError = null);
+    widget.onSave(position);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -795,7 +892,7 @@ class _MarkerInlineEditor extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '${isEditingExisting ? '编辑' : '新增'} ${formatVideoMarkerPosition(position)}',
+                widget.isEditingExisting ? '编辑时间点' : '新增时间点',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 13,
@@ -803,11 +900,53 @@ class _MarkerInlineEditor extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (widget.showHourField) ...[
+                    Expanded(
+                      child: _MarkerPositionInput(
+                        controller: _hourController,
+                        label: '时',
+                        enabled: !widget.isSaving,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: _MarkerPositionInput(
+                      controller: _minuteController,
+                      label: '分',
+                      enabled: !widget.isSaving,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _MarkerPositionInput(
+                      controller: _secondController,
+                      label: '秒',
+                      enabled: !widget.isSaving,
+                    ),
+                  ),
+                ],
+              ),
+              if (_positionError != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _positionError!,
+                  style: const TextStyle(
+                    color: Color(0xffffb4ab),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
               TextField(
-                controller: controller,
-                minLines: 3,
-                maxLines: 5,
+                controller: widget.controller,
+                minLines: 1,
+                maxLines: 2,
                 autofocus: true,
+                enabled: !widget.isSaving,
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 decoration: InputDecoration(
                   hintText: '写下这个时间点值得学习的地方',
@@ -824,7 +963,10 @@ class _MarkerInlineEditor extends StatelessWidget {
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: Color(0xff9ad8ff)),
                   ),
-                  contentPadding: const EdgeInsets.all(10),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -832,19 +974,67 @@ class _MarkerInlineEditor extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: isSaving ? null : onCancel,
+                    onPressed: widget.isSaving ? null : widget.onCancel,
                     child: const Text('取消'),
                   ),
                   const SizedBox(width: 6),
                   FilledButton(
-                    onPressed: isSaving ? null : onSave,
-                    child: Text(isSaving ? '保存中' : '保存'),
+                    onPressed: widget.isSaving ? null : _save,
+                    child: Text(widget.isSaving ? '保存中' : '保存'),
                   ),
                 ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MarkerPositionInput extends StatelessWidget {
+  const _MarkerPositionInput({
+    required this.controller,
+    required this.label,
+    required this.enabled,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      textAlign: TextAlign.center,
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.white60, fontSize: 11),
+        filled: true,
+        fillColor: Colors.black.withValues(alpha: 0.24),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Color(0xff9ad8ff)),
+        ),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
       ),
     );
   }

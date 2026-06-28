@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offnote/article_database.dart';
 import 'package:offnote/saved_article.dart';
+import 'package:offnote/saved_resource.dart';
 import 'package:offnote/saved_tag.dart';
 import 'package:offnote/video_marker.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -474,6 +475,61 @@ void main() {
 
     expect((await db.listTags()).single.name, '已整理');
     expect((await db.listArticleTags('a1')).single.name, '已整理');
+  });
+
+  test('creates resources and filters them by type, query, and tags', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+    await db.upsertArticle(article(id: 'a1', title: '素材来源', content: ''));
+    final useful = await db.createTag('有用', 0xffd83f5f);
+    final image = await db.createImageResource(
+      articleId: 'a1',
+      imagePath: '/tmp/a1/images/image_0.jpg',
+      title: '构图参考',
+      note: '封面可以借鉴',
+      tagIds: {useful.id},
+    );
+    await db.createVideoClipResource(
+      articleId: 'a1',
+      videoPath: '/tmp/resources/clip.mp4',
+      originalVideoPath: '/tmp/a1/videos/video_0.mp4',
+      previewPath: '/tmp/a1/images/poster.jpg',
+      title: '转场片段',
+      note: '节奏很好',
+      start: const Duration(seconds: 12),
+      end: const Duration(seconds: 24),
+    );
+
+    final tagged = await db.searchResourcesPage('', tagIds: {useful.id});
+    final videos = await db.searchResourcesPage(
+      '转场',
+      types: {SavedResourceType.videoClip},
+    );
+
+    expect(tagged.map((resource) => resource.id), [image.id]);
+    expect(videos.single.type, SavedResourceType.videoClip);
+    expect(videos.single.sourcePath, '/tmp/resources/clip.mp4');
+    expect(videos.single.originalSourcePath, '/tmp/a1/videos/video_0.mp4');
+    expect(videos.single.status, SavedResourceStatus.processing);
+    expect(videos.single.start, const Duration(seconds: 12));
+    expect((await db.listResourceTags(image.id)).single.name, '有用');
+  });
+
+  test('cleans resource relations when tags or articles are deleted', () async {
+    final db = await openTestDatabase(inMemoryDatabasePath);
+    await db.upsertArticle(article(id: 'a1', title: '素材来源', content: ''));
+    final tag = await db.createTag('待复盘', 0xff4f8df7);
+    final resource = await db.createImageResource(
+      articleId: 'a1',
+      imagePath: '/tmp/a1/images/image_0.jpg',
+      title: '配色参考',
+      tagIds: {tag.id},
+    );
+
+    await db.deleteTag(tag.id);
+    expect(await db.listResourceTags(resource.id), isEmpty);
+
+    await db.deleteArticle('a1');
+    expect(await db.searchResourcesPage('配色'), isEmpty);
   });
 
   test('restores tags from an older database migration', () async {

@@ -9,11 +9,14 @@ import 'article_database.dart';
 import 'article_file_paths.dart';
 import 'article_snapshot.dart';
 import 'article_storage_stats.dart';
+import 'backup_file_picker.dart';
 import 'media_download_failure.dart';
 import 'offnote_backup_service.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_resource.dart';
 import 'saved_tag.dart';
+import 'video_clip_service.dart';
 import 'video_marker.dart';
 import 'xhs_offline_html.dart';
 
@@ -24,6 +27,8 @@ class ArticleSnapshotStore {
 
   final Dio _dio;
   final ArticleDatabase _database;
+  final VideoClipService _videoClipService = const VideoClipService();
+  final BackupFilePicker _backupFilePicker = const BackupFilePicker();
 
   Future<SavedArticle> save({
     required String rawHtml,
@@ -138,6 +143,8 @@ class ArticleSnapshotStore {
   }
 
   Future<List<SavedArticle>> listArticles() => _database.listArticles();
+
+  Future<SavedArticle?> getArticle(String id) => _database.getArticle(id);
 
   Future<List<SavedArticle>> listArticlesPage({
     int limit = 20,
@@ -329,6 +336,164 @@ class ArticleSnapshotStore {
     return _database.deleteVideoMarker(id);
   }
 
+  Future<SavedResource> createImageResource({
+    required String articleId,
+    required String imagePath,
+    required String title,
+    String note = '',
+    Set<String> tagIds = const {},
+  }) {
+    return _database.createImageResource(
+      articleId: articleId,
+      imagePath: imagePath,
+      title: title,
+      note: note,
+      tagIds: tagIds,
+    );
+  }
+
+  Future<SavedResource> createVideoClipResource({
+    required String articleId,
+    required String videoPath,
+    required String? previewPath,
+    required String title,
+    String note = '',
+    required Duration start,
+    required Duration end,
+    Set<String> tagIds = const {},
+  }) async {
+    final root = await getApplicationDocumentsDirectory();
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final resourceDir = Directory(p.join(root.path, 'resources', id));
+    await resourceDir.create(recursive: true);
+    final outputPath = p.join(resourceDir.path, 'clip.mp4');
+    final resource = await _database.createVideoClipResource(
+      id: id,
+      articleId: articleId,
+      videoPath: outputPath,
+      originalVideoPath: videoPath,
+      previewPath: previewPath,
+      title: title,
+      note: note,
+      start: start,
+      end: end,
+      tagIds: tagIds,
+    );
+    await _processVideoClipResource(
+      resourceId: resource.id,
+      inputPath: videoPath,
+      outputPath: outputPath,
+      start: start,
+      end: end,
+      resource: resource,
+    );
+    return resource;
+  }
+
+  Future<SavedResource> retryVideoClipResource(SavedResource resource) async {
+    final inputPath = resource.originalSourcePath;
+    final start = resource.start;
+    final end = resource.end;
+    if (inputPath == null || start == null || end == null) {
+      throw VideoClipProcessingException(
+        resource: resource,
+        message: '缺少来源视频或时间范围，无法重试',
+      );
+    }
+    await _database.updateResourceProcessingState(
+      resource.id,
+      status: SavedResourceStatus.processing,
+    );
+    await _processVideoClipResource(
+      resourceId: resource.id,
+      inputPath: inputPath,
+      outputPath: resource.sourcePath,
+      start: start,
+      end: end,
+      resource: resource,
+    );
+    return resource;
+  }
+
+  Future<void> _processVideoClipResource({
+    required String resourceId,
+    required String inputPath,
+    required String outputPath,
+    required Duration start,
+    required Duration end,
+    required SavedResource resource,
+  }) async {
+    try {
+      await _videoClipService.trimVideo(
+        inputPath: inputPath,
+        outputPath: outputPath,
+        start: start,
+        end: end,
+      );
+      await _database.updateResourceProcessingState(
+        resourceId,
+        status: SavedResourceStatus.ready,
+      );
+    } catch (error) {
+      final outputFile = File(outputPath);
+      if (outputFile.existsSync()) {
+        outputFile.deleteSync();
+      }
+      await _database.updateResourceProcessingState(
+        resourceId,
+        status: SavedResourceStatus.failed,
+        error: _briefError(error),
+      );
+      throw VideoClipProcessingException(
+        resource: resource,
+        message: _briefError(error),
+      );
+    }
+  }
+
+  Future<List<SavedResource>> searchResourcesPage(
+    String query, {
+    int limit = 20,
+    int offset = 0,
+    Set<SavedResourceType> types = const {},
+    Set<String> tagIds = const {},
+  }) {
+    return _database.searchResourcesPage(
+      query,
+      limit: limit,
+      offset: offset,
+      types: types,
+      tagIds: tagIds,
+    );
+  }
+
+  Future<List<SavedTag>> listResourceTags(String resourceId) {
+    return _database.listResourceTags(resourceId);
+  }
+
+  Future<Map<String, List<SavedTag>>> listTagsByResourceIds(
+    Iterable<String> resourceIds,
+  ) {
+    return _database.listTagsByResourceIds(resourceIds);
+  }
+
+  Future<void> setResourceTags(String resourceId, Set<String> tagIds) {
+    return _database.setResourceTags(resourceId, tagIds);
+  }
+
+  Future<void> deleteResource(SavedResource resource) async {
+    await _database.deleteResource(resource.id);
+    if (resource.type == SavedResourceType.videoClip) {
+      final file = File(resource.sourcePath);
+      final parent = file.parent;
+      if (parent.existsSync() && p.basename(parent.path) == resource.id) {
+        await parent.delete(recursive: true);
+      } else if (file.existsSync()) {
+        await file.delete();
+      }
+    }
+  }
+
   Future<ArticleStorageStats> loadStorageStats() async {
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final articles = await _database.listArticles();
@@ -354,6 +519,26 @@ class ArticleSnapshotStore {
       database: _database,
       documentsDirectory: documentsDirectory,
     ).listBackups();
+  }
+
+  Future<File?> pickAndImportBackupFile() async {
+    final path = await _backupFilePicker.pickBackupFilePath();
+    if (path == null || path.trim().isEmpty) {
+      return null;
+    }
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return OffNoteBackupService(
+      database: _database,
+      documentsDirectory: documentsDirectory,
+    ).importManagedBackupFile(File(path));
+  }
+
+  Future<File> importBackupFile(File backupFile) async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    return OffNoteBackupService(
+      database: _database,
+      documentsDirectory: documentsDirectory,
+    ).importManagedBackupFile(backupFile);
   }
 
   Future<OffNoteBackupImportResult> restoreBackup(File backupFile) async {
@@ -661,6 +846,19 @@ class ArticleSnapshotStore {
     }
     return error.toString();
   }
+}
+
+class VideoClipProcessingException implements Exception {
+  const VideoClipProcessingException({
+    required this.resource,
+    required this.message,
+  });
+
+  final SavedResource resource;
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 class _ImageDownloadResult {

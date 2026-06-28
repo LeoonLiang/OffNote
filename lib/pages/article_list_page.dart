@@ -6,6 +6,7 @@ class ArticleListPage extends StatefulWidget {
     required this.title,
     required this.store,
     required this.onChanged,
+    this.resourceQueue,
     this.category,
     this.searchable = false,
     this.actions = const [],
@@ -14,6 +15,7 @@ class ArticleListPage extends StatefulWidget {
 
   final String title;
   final ArticleSnapshotStore store;
+  final ResourceProcessingQueueController? resourceQueue;
   final SavedCategory? category;
   final VoidCallback onChanged;
   final bool searchable;
@@ -503,8 +505,11 @@ class _ArticleListPageState extends State<ArticleListPage> {
   Future<void> _openArticle(SavedArticle article) async {
     final result = await Navigator.of(context).push<ArticleDetailResult>(
       MaterialPageRoute<ArticleDetailResult>(
-        builder: (_) =>
-            ArticleDetailPage(article: article, store: widget.store),
+        builder: (_) => ArticleDetailPage(
+          article: article,
+          store: widget.store,
+          resourceQueue: widget.resourceQueue,
+        ),
       ),
     );
     if (!result.needsListRefresh) {

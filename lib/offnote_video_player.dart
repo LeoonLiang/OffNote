@@ -15,6 +15,8 @@ typedef VideoMarkerCreateCallback =
 typedef VideoMarkerUpdateCallback =
     Future<void> Function(VideoMarker marker, Duration position, String note);
 typedef VideoMarkerDeleteCallback = Future<void> Function(VideoMarker marker);
+typedef VideoClipCreateCallback =
+    Future<void> Function(Duration position, Duration duration);
 
 class OffNoteVideoSource {
   const OffNoteVideoSource({required this.videoUri, this.posterUri});
@@ -144,6 +146,9 @@ class OffNoteVideoPlayer extends StatefulWidget {
     this.onCreateMarker,
     this.onUpdateMarker,
     this.onDeleteMarker,
+    this.onCreateClip,
+    this.initialPosition,
+    this.clipEnd,
   });
 
   final OffNoteVideoSource source;
@@ -152,6 +157,9 @@ class OffNoteVideoPlayer extends StatefulWidget {
   final VideoMarkerCreateCallback? onCreateMarker;
   final VideoMarkerUpdateCallback? onUpdateMarker;
   final VideoMarkerDeleteCallback? onDeleteMarker;
+  final VideoClipCreateCallback? onCreateClip;
+  final Duration? initialPosition;
+  final Duration? clipEnd;
 
   @override
   State<OffNoteVideoPlayer> createState() => _OffNoteVideoPlayerState();
@@ -189,11 +197,21 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
         }
       }),
       _player.stream.duration.listen((_) => _bumpMarkerOverlay()),
+      _player.stream.position.listen((position) {
+        final clipEnd = widget.clipEnd;
+        if (clipEnd != null && clipEnd > Duration.zero && position >= clipEnd) {
+          _player.pause();
+        }
+      }),
     ]);
-    _player.open(
-      Media(widget.source.videoUri),
-      play: offNoteVideoAutoPlayOnOpen,
-    );
+    _player
+        .open(Media(widget.source.videoUri), play: offNoteVideoAutoPlayOnOpen)
+        .then((_) {
+          final initialPosition = widget.initialPosition;
+          if (initialPosition != null && initialPosition > Duration.zero) {
+            _player.seek(initialPosition);
+          }
+        });
   }
 
   @override
@@ -319,7 +337,8 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
                   left: 14,
                   child: _SeekIndicator(offset: _seekOffset!),
                 ),
-              if (_hasMarkerActions) _buildMarkerOverlayLayer(context),
+              if (_hasMarkerActions || widget.onCreateClip != null)
+                _buildMarkerOverlayLayer(context),
             ],
           ),
         );
@@ -337,7 +356,8 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
           fit: StackFit.expand,
           children: [
             AdaptiveVideoControls(state),
-            if (_hasMarkerActions) _buildMarkerOverlayLayer(context),
+            if (_hasMarkerActions || widget.onCreateClip != null)
+              _buildMarkerOverlayLayer(context),
           ],
         );
       },
@@ -355,10 +375,24 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
               alignment: calculateVideoMarkerEntryAlignment(),
               child: Padding(
                 padding: const EdgeInsets.only(right: 14),
-                child: _MarkerPanelButton(
-                  isOpen: _isMarkerPanelOpen,
-                  markerCount: widget.markers.length,
-                  onTap: _toggleMarkerPanel,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.onCreateClip != null) ...[
+                      _VideoOverlayActionButton(
+                        icon: Icons.bookmark_add_rounded,
+                        tooltip: '收藏当前片段',
+                        onTap: _createClipAtCurrentPosition,
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    if (_hasMarkerActions)
+                      _MarkerPanelButton(
+                        isOpen: _isMarkerPanelOpen,
+                        markerCount: widget.markers.length,
+                        onTap: _toggleMarkerPanel,
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -498,6 +532,13 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
     await _player.play();
   }
 
+  Future<void> _createClipAtCurrentPosition() async {
+    await widget.onCreateClip?.call(
+      _player.state.position,
+      _player.state.duration,
+    );
+  }
+
   Future<void> _withMarkerSaving(Future<void> Function() action) async {
     if (_isSavingMarker) {
       return;
@@ -512,6 +553,43 @@ class _OffNoteVideoPlayerState extends State<OffNoteVideoPlayer> {
         _bumpMarkerOverlay();
       }
     }
+  }
+}
+
+class _VideoOverlayActionButton extends StatelessWidget {
+  const _VideoOverlayActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.58),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(icon, color: Colors.white, size: 20),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

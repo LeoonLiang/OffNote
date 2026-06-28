@@ -7,18 +7,22 @@ import 'package:path/path.dart' as p;
 import 'article_database.dart';
 import 'saved_article.dart';
 import 'saved_category.dart';
+import 'saved_resource.dart';
 import 'saved_tag.dart';
+import 'video_marker.dart';
 
 class OffNoteBackupImportResult {
   const OffNoteBackupImportResult({
     required this.articleCount,
     required this.categoryCount,
     required this.tagCount,
+    required this.resourceCount,
   });
 
   final int articleCount;
   final int categoryCount;
   final int tagCount;
+  final int resourceCount;
 }
 
 class OffNoteBackupEntry {
@@ -28,6 +32,7 @@ class OffNoteBackupEntry {
     required this.articleCount,
     required this.categoryCount,
     required this.tagCount,
+    required this.resourceCount,
     required this.sizeBytes,
   });
 
@@ -36,6 +41,7 @@ class OffNoteBackupEntry {
   final int articleCount;
   final int categoryCount;
   final int tagCount;
+  final int resourceCount;
   final int sizeBytes;
 }
 
@@ -56,42 +62,34 @@ class OffNoteBackupService {
     final articles = await _database.listArticles();
     final categories = await _database.listCategories();
     final tags = await _database.listTags();
+    final resources = await _database.listResources();
+    final videoMarkers = await _database.listAllVideoMarkers();
     final articleTags = await _database.listArticleTagAssignments();
+    final resourceTags = await _database.listResourceTagAssignments();
     final archive = Archive();
 
     final manifest = {
       'format': 'offnote-backup',
-      'version': 1,
+      'version': 2,
       'exported_at': DateTime.now().toIso8601String(),
       'articles': articles.map(_articleToBackupMap).toList(growable: false),
+      'resources': resources.map(_resourceToBackupMap).toList(growable: false),
       'categories': categories
           .map((category) => category.toMap())
           .toList(growable: false),
       'tags': tags.map((tag) => tag.toMap()).toList(growable: false),
+      'video_markers': videoMarkers
+          .map((marker) => marker.toMap())
+          .toList(growable: false),
       'article_tags': articleTags,
+      'resource_tags': resourceTags,
     };
     archive.addFile(
       ArchiveFile.string('offnote-backup.json', jsonEncode(manifest)),
     );
 
-    final articlesDir = Directory(p.join(_documentsDirectory.path, 'articles'));
-    if (articlesDir.existsSync()) {
-      for (final entity in articlesDir.listSync(recursive: true)) {
-        if (entity is! File) {
-          continue;
-        }
-        final relativePath = p.relative(
-          entity.path,
-          from: _documentsDirectory.path,
-        );
-        archive.addFile(
-          ArchiveFile.bytes(
-            _archivePath(relativePath),
-            entity.readAsBytesSync(),
-          ),
-        );
-      }
-    }
+    _addDocumentDirectoryToArchive(archive, 'articles');
+    _addDocumentDirectoryToArchive(archive, 'resources');
 
     outputFile.parent.createSync(recursive: true);
     outputFile.writeAsBytesSync(ZipEncoder().encodeBytes(archive));
@@ -107,12 +105,16 @@ class OffNoteBackupService {
     final manifest = jsonDecode(utf8.decode(manifestFile.readBytes()!));
     if (manifest is! Map<String, Object?> ||
         manifest['format'] != 'offnote-backup' ||
-        manifest['version'] != 1) {
+        (manifest['version'] != 1 && manifest['version'] != 2)) {
       throw const FormatException('不支持的 OffNote 备份格式');
     }
 
+    _replaceManagedDirectory('articles');
+    _replaceManagedDirectory('resources');
     for (final entry in archive) {
-      if (entry.isFile && entry.name.startsWith('articles/')) {
+      if (entry.isFile &&
+          (entry.name.startsWith('articles/') ||
+              entry.name.startsWith('resources/'))) {
         final target = _safeDocumentFile(entry.name);
         target.parent.createSync(recursive: true);
         target.writeAsBytesSync(entry.readBytes()!);
@@ -128,34 +130,30 @@ class OffNoteBackupService {
     final tags = _listOfMaps(
       manifest['tags'],
     ).map(SavedTag.fromMap).toList(growable: false);
+    final videoMarkers = _listOfMaps(
+      manifest['video_markers'],
+    ).map(VideoMarker.fromMap).toList(growable: false);
+    final resources = _listOfMaps(
+      manifest['resources'],
+    ).map(_resourceFromBackupMap).toList(growable: false);
     final articleTags = _listOfMaps(manifest['article_tags']);
+    final resourceTags = _listOfMaps(manifest['resource_tags']);
 
-    for (final category in categories) {
-      await _database.upsertCategory(category);
-    }
-    for (final tag in tags) {
-      await _database.upsertTag(tag);
-    }
-    for (final article in articles) {
-      await _database.upsertArticle(article);
-    }
-    for (final assignment in articleTags) {
-      final articleId = assignment['article_id'] as String?;
-      final tagId = assignment['tag_id'] as String?;
-      if (articleId == null || tagId == null) {
-        continue;
-      }
-      await _database.upsertArticleTagAssignment(
-        articleId,
-        tagId,
-        createdAt: assignment['created_at'] as int?,
-      );
-    }
+    await _database.replaceBackupData(
+      categories: categories,
+      tags: tags,
+      articles: articles,
+      videoMarkers: videoMarkers,
+      resources: resources,
+      articleTags: articleTags,
+      resourceTags: resourceTags,
+    );
 
     return OffNoteBackupImportResult(
       articleCount: articles.length,
       categoryCount: categories.length,
       tagCount: tags.length,
+      resourceCount: resources.length,
     );
   }
 
@@ -168,6 +166,35 @@ class OffNoteBackupService {
       ),
     );
     return exportToFile(file);
+  }
+
+  Future<File> importManagedBackupFile(File sourceFile) async {
+    final entry = _readBackupEntry(sourceFile);
+    if (entry == null) {
+      throw const FormatException('不是有效的 OffNote 备份文件');
+    }
+    _backupsDirectory.createSync(recursive: true);
+    final created = entry.createdAt;
+    var target = File(
+      p.join(
+        _backupsDirectory.path,
+        'offnote-backup-${_backupStamp(created)}.offnote-backup',
+      ),
+    );
+    if (p.equals(p.normalize(sourceFile.path), p.normalize(target.path))) {
+      return sourceFile;
+    }
+    var suffix = 1;
+    while (target.existsSync()) {
+      target = File(
+        p.join(
+          _backupsDirectory.path,
+          'offnote-backup-${_backupStamp(created)}-$suffix.offnote-backup',
+        ),
+      );
+      suffix++;
+    }
+    return sourceFile.copy(target.path);
   }
 
   Future<List<OffNoteBackupEntry>> listBackups() async {
@@ -212,6 +239,16 @@ class OffNoteBackupService {
     return map;
   }
 
+  Map<String, Object?> _resourceToBackupMap(SavedResource resource) {
+    final map = resource.toMap();
+    map['source_path'] = _relativeDocumentPath(resource.sourcePath);
+    map['preview_path'] = _relativeDocumentPath(resource.previewPath);
+    map['original_source_path'] = _relativeDocumentPath(
+      resource.originalSourcePath,
+    );
+    return map;
+  }
+
   SavedArticle _articleFromBackupMap(Map<String, Object?> map) {
     final restored = Map<String, Object?>.from(map);
     restored['html_path'] = _absoluteDocumentPath(restored['html_path']);
@@ -221,6 +258,46 @@ class OffNoteBackupService {
       imagePaths.map(_absoluteDocumentPath).whereType<String>().toList(),
     );
     return SavedArticle.fromMap(restored);
+  }
+
+  SavedResource _resourceFromBackupMap(Map<String, Object?> map) {
+    final restored = Map<String, Object?>.from(map);
+    restored['source_path'] = _absoluteDocumentPath(restored['source_path']);
+    restored['preview_path'] = _absoluteDocumentPath(restored['preview_path']);
+    restored['original_source_path'] = _absoluteDocumentPath(
+      restored['original_source_path'],
+    );
+    return SavedResource.fromMap(restored);
+  }
+
+  void _addDocumentDirectoryToArchive(Archive archive, String directoryName) {
+    final directory = Directory(
+      p.join(_documentsDirectory.path, directoryName),
+    );
+    if (!directory.existsSync()) {
+      return;
+    }
+    for (final entity in directory.listSync(recursive: true)) {
+      if (entity is! File) {
+        continue;
+      }
+      final relativePath = p.relative(
+        entity.path,
+        from: _documentsDirectory.path,
+      );
+      archive.addFile(
+        ArchiveFile.bytes(_archivePath(relativePath), entity.readAsBytesSync()),
+      );
+    }
+  }
+
+  void _replaceManagedDirectory(String directoryName) {
+    final directory = Directory(
+      p.join(_documentsDirectory.path, directoryName),
+    );
+    if (directory.existsSync()) {
+      directory.deleteSync(recursive: true);
+    }
   }
 
   String? _relativeDocumentPath(String? path) {
@@ -293,6 +370,7 @@ class OffNoteBackupService {
         articleCount: _listOfMaps(manifest['articles']).length,
         categoryCount: _listOfMaps(manifest['categories']).length,
         tagCount: _listOfMaps(manifest['tags']).length,
+        resourceCount: _listOfMaps(manifest['resources']).length,
         sizeBytes: file.lengthSync(),
       );
     } catch (_) {

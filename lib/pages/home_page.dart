@@ -14,6 +14,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       store: _store,
     ).saveUrl(request.url, allowPartialMedia: request.allowPartialMedia),
   );
+  late final ResourceProcessingQueueController _resourceQueue =
+      ResourceProcessingQueueController(store: _store, onChanged: _refresh);
   final _notifiedTaskStatuses = <String, SaveQueueTaskStatus>{};
   int _index = 0;
   int _refreshTick = 0;
@@ -42,6 +44,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _saveQueue.removeListener(_onQueueChanged);
     _shareSubscription?.cancel();
+    _resourceQueue.dispose();
     _saveQueue.dispose();
     super.dispose();
   }
@@ -194,7 +197,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _openArticle(SavedArticle article) async {
     final result = await Navigator.of(context).push<ArticleDetailResult>(
       MaterialPageRoute<ArticleDetailResult>(
-        builder: (_) => ArticleDetailPage(article: article, store: _store),
+        builder: (_) => ArticleDetailPage(
+          article: article,
+          store: _store,
+          resourceQueue: _resourceQueue,
+        ),
       ),
     );
     if (result.needsListRefresh) {
@@ -205,6 +212,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final sharedActions = [
+      IconButton(
+        onPressed: _openResourceQueue,
+        tooltip: '素材处理队列',
+        icon: AnimatedBuilder(
+          animation: _resourceQueue,
+          builder: (context, _) => Badge(
+            isLabelVisible:
+                _resourceQueue.activeCount > 0 || _resourceQueue.hasFailed,
+            label: Text(
+              _resourceQueue.activeCount > 0
+                  ? '${_resourceQueue.activeCount}'
+                  : '!',
+            ),
+            child: const Icon(Icons.video_file_rounded),
+          ),
+        ),
+      ),
       IconButton(
         onPressed: _openSaveQueue,
         tooltip: '收录队列',
@@ -223,12 +247,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         searchable: true,
         actions: sharedActions,
         refreshToken: _refreshTick,
+        resourceQueue: _resourceQueue,
       ),
       GalleryPage(
         store: _store,
         onChanged: _refresh,
         actions: sharedActions,
         refreshToken: _refreshTick,
+        resourceQueue: _resourceQueue,
+      ),
+      ResourceLibraryPage(
+        store: _store,
+        onChanged: _refresh,
+        actions: sharedActions,
+        refreshToken: _refreshTick,
+        resourceQueue: _resourceQueue,
       ),
       SettingsPage(store: _store, queue: _saveQueue, onChanged: _refresh),
     ];
@@ -267,9 +300,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ),
               _NavItem(
                 selected: _index == 2,
+                icon: Icons.bookmarks_rounded,
+                label: '素材',
+                onTap: () => setState(() => _index = 2),
+              ),
+              _NavItem(
+                selected: _index == 3,
                 icon: Icons.settings_rounded,
                 label: '设置',
-                onTap: () => setState(() => _index = 2),
+                onTap: () => setState(() => _index = 3),
               ),
             ],
           ),
@@ -282,5 +321,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => SaveQueuePage(queue: _saveQueue)),
     );
+  }
+
+  Future<void> _openResourceQueue() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ResourceProcessingQueuePage(queue: _resourceQueue),
+      ),
+    );
+    _refresh();
   }
 }

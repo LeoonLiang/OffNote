@@ -38,12 +38,14 @@ class GalleryPage extends StatefulWidget {
     super.key,
     required this.store,
     required this.onChanged,
+    required this.resourceQueue,
     this.actions = const [],
     this.refreshToken = 0,
   });
 
   final ArticleSnapshotStore store;
   final VoidCallback onChanged;
+  final ResourceProcessingQueueController resourceQueue;
   final List<Widget> actions;
   final int refreshToken;
 
@@ -364,8 +366,11 @@ class _GalleryPageState extends State<GalleryPage> {
   Future<void> _openArticle(SavedArticle article) async {
     final result = await Navigator.of(context).push<ArticleDetailResult>(
       MaterialPageRoute<ArticleDetailResult>(
-        builder: (_) =>
-            ArticleDetailPage(article: article, store: widget.store),
+        builder: (_) => ArticleDetailPage(
+          article: article,
+          store: widget.store,
+          resourceQueue: widget.resourceQueue,
+        ),
       ),
     );
     if (!result.needsListRefresh) {

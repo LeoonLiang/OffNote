@@ -349,6 +349,11 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
         ),
         actions: [
           IconButton(
+            onPressed: _creating || _busyPath != null ? null : _importBackup,
+            tooltip: '导入备份文件',
+            icon: const Icon(Icons.file_open_rounded),
+          ),
+          IconButton(
             onPressed: _creating ? null : _createBackup,
             tooltip: '立即备份',
             icon: _creating
@@ -371,6 +376,7 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
             return RefreshIndicator(
               onRefresh: _refresh,
               child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                 children: [
                   ShadButton(
@@ -386,6 +392,22 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
                           )
                         : const Icon(Icons.backup_rounded, size: 18),
                     child: Text(_creating ? '正在备份...' : '立即备份'),
+                  ),
+                  const SizedBox(height: 8),
+                  ShadButton.outline(
+                    onPressed: _creating || _busyPath != null
+                        ? null
+                        : _importBackup,
+                    width: double.infinity,
+                    leading: _busyPath == '__import__'
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.file_open_rounded, size: 18),
+                    child: Text(
+                      _busyPath == '__import__' ? '正在导入...' : '从文件管理导入备份',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   if (backups.isEmpty)
@@ -417,7 +439,7 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
             style: const TextStyle(fontWeight: FontWeight.w800),
           ),
           subtitle: Text(
-            '${backup.articleCount} 篇文章 · ${backup.categoryCount} 个分类 · ${backup.tagCount} 个标签 · ${_formatBytes(backup.sizeBytes)}',
+            '${backup.articleCount} 篇文章 · ${backup.categoryCount} 个分类 · ${backup.tagCount} 个标签 · ${backup.resourceCount} 个素材 · ${_formatBytes(backup.sizeBytes)}',
           ),
           trailing: busy
               ? const SizedBox.square(
@@ -428,12 +450,15 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
                   onSelected: (value) {
                     if (value == 'restore') {
                       _restoreBackup(backup);
+                    } else if (value == 'share') {
+                      _shareBackup(backup);
                     } else if (value == 'delete') {
                       _deleteBackup(backup);
                     }
                   },
                   itemBuilder: (context) => const [
                     PopupMenuItem(value: 'restore', child: Text('恢复')),
+                    PopupMenuItem(value: 'share', child: Text('分享/保存文件')),
                     PopupMenuItem(value: 'delete', child: Text('删除')),
                   ],
                 ),
@@ -449,10 +474,17 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
       if (!mounted) {
         return;
       }
+      setState(() {
+        _creating = false;
+        _future = widget.store.listBackups();
+      });
+      await _future;
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('备份已创建')));
-      await _refresh();
     } catch (error) {
       if (!mounted) {
         return;
@@ -467,14 +499,59 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
     }
   }
 
+  Future<void> _importBackup() async {
+    setState(() => _busyPath = '__import__');
+    try {
+      final file = await widget.store.pickAndImportBackupFile();
+      if (!mounted) {
+        return;
+      }
+      if (file == null) {
+        setState(() => _busyPath = null);
+        return;
+      }
+      setState(() {
+        _busyPath = null;
+        _future = widget.store.listBackups();
+      });
+      await _future;
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('备份文件已导入')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入备份失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() => _busyPath = null);
+      }
+    }
+  }
+
+  Future<void> _shareBackup(OffNoteBackupEntry backup) {
+    return SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(backup.file.path)],
+        text: 'OffNote 备份 ${_formatBackupDate(backup.createdAt)}',
+      ),
+    );
+  }
+
   Future<void> _restoreBackup(OffNoteBackupEntry backup) async {
     final confirmed = await showShadDialog<bool>(
       context: context,
       builder: (context) => ShadDialog.alert(
         title: const Text('恢复备份'),
         description: Text(
-          '将恢复 ${backup.articleCount} 篇文章、${backup.categoryCount} 个分类和 ${backup.tagCount} 个标签。'
-          '同一篇文章会被备份内容覆盖。',
+          '将恢复 ${backup.articleCount} 篇文章、${backup.categoryCount} 个分类、${backup.tagCount} 个标签和 ${backup.resourceCount} 个素材。'
+          '当前数据会被备份内容替换。',
         ),
         actions: [
           ShadButton.outline(
@@ -501,10 +578,11 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '已恢复 ${result.articleCount} 篇文章、${result.categoryCount} 个分类、${result.tagCount} 个标签',
+            '已恢复 ${result.articleCount} 篇文章、${result.categoryCount} 个分类、${result.tagCount} 个标签、${result.resourceCount} 个素材',
           ),
         ),
       );
+      await _refresh();
     } catch (error) {
       if (!mounted) {
         return;

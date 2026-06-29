@@ -452,6 +452,8 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
                       _restoreBackup(backup);
                     } else if (value == 'share') {
                       _shareBackup(backup);
+                    } else if (value == 'downloads') {
+                      _exportBackupToDownloads(backup);
                     } else if (value == 'delete') {
                       _deleteBackup(backup);
                     }
@@ -459,6 +461,10 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
                   itemBuilder: (context) => const [
                     PopupMenuItem(value: 'restore', child: Text('恢复')),
                     PopupMenuItem(value: 'share', child: Text('分享/保存文件')),
+                    PopupMenuItem(
+                      value: 'downloads',
+                      child: Text('导出到下载目录'),
+                    ),
                     PopupMenuItem(value: 'delete', child: Text('删除')),
                   ],
                 ),
@@ -542,6 +548,38 @@ class _BackupManagerPageState extends State<BackupManagerPage> {
         text: 'OffNote 备份 ${_formatBackupDate(backup.createdAt)}',
       ),
     );
+  }
+
+  Future<void> _exportBackupToDownloads(OffNoteBackupEntry backup) async {
+    setState(() => _busyPath = backup.file.path);
+    try {
+      final exportedPath = await widget.store.exportBackupToDownloads(
+        backup.file,
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            exportedPath == null || exportedPath.trim().isEmpty
+                ? '备份已导出到下载目录'
+                : '备份已导出到 $exportedPath',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出备份失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() => _busyPath = null);
+      }
+    }
   }
 
   Future<void> _restoreBackup(OffNoteBackupEntry backup) async {

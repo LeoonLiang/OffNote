@@ -618,6 +618,10 @@ class ArticleSnapshotStore {
     ).importManagedBackupFile(File(path));
   }
 
+  Future<String?> exportBackupToDownloads(File backupFile) {
+    return _backupFilePicker.exportBackupToDownloads(backupFile.path);
+  }
+
   Future<File> importBackupFile(File backupFile) async {
     final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(

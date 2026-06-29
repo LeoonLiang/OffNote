@@ -1,13 +1,17 @@
 package com.leoon.offnote.offnote
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.database.Cursor
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaMuxer
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.OpenableColumns
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -91,6 +95,19 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "offnote/backup_files"
         ).setMethodCallHandler { call, result ->
+            if (call.method == "exportBackupToDownloads") {
+                val path = call.argument<String>("path")
+                if (path.isNullOrBlank()) {
+                    result.error("missing_path", "Backup path is empty", null)
+                    return@setMethodCallHandler
+                }
+                try {
+                    result.success(exportBackupToDownloads(path))
+                } catch (error: Exception) {
+                    result.error("export_failed", error.message, null)
+                }
+                return@setMethodCallHandler
+            }
             if (call.method != "pickBackupFile") {
                 result.notImplemented()
                 return@setMethodCallHandler
@@ -211,6 +228,61 @@ class MainActivity : FlutterActivity() {
             }
         }
         return target.absolutePath
+    }
+
+    private fun exportBackupToDownloads(path: String): String {
+        val source = File(path)
+        if (!source.exists() || !source.isFile) {
+            throw IllegalArgumentException("Backup file does not exist")
+        }
+        val name = sanitizeFileName(source.name.ifBlank { "offnote-backup.offnote-backup" })
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            exportBackupWithMediaStore(source, name)
+        } else {
+            exportBackupToPublicDownloads(source, name)
+        }
+    }
+
+    private fun exportBackupWithMediaStore(source: File, name: String): String {
+        val resolver = contentResolver
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/OffNote"
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.Downloads.RELATIVE_PATH, relativePath)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IllegalStateException("Cannot create download entry")
+        try {
+            resolver.openOutputStream(uri).use { output ->
+                if (output == null) {
+                    throw IllegalStateException("Cannot open download output")
+                }
+                source.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            }
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            return "Download/OffNote/$name"
+        } catch (error: Exception) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun exportBackupToPublicDownloads(source: File, name: String): String {
+        val directory = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "OffNote"
+        )
+        directory.mkdirs()
+        val target = File(directory, name)
+        source.copyTo(target, overwrite = true)
+        return "Download/OffNote/$name"
     }
 
     private fun copyPickedResourceToCache(uri: Uri): String {

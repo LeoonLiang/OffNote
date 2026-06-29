@@ -47,6 +47,9 @@ app.*.map.json
 
 # Local Android/iOS configuration
 android/local.properties
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
 ios/Pods/
 ios/Podfile.lock
 

@@ -35,6 +35,7 @@ import 'offnote_backup_service.dart';
 import 'offnote_link_share.dart';
 import 'offnote_video_player.dart';
 import 'resource_processing_queue.dart';
+import 'resource_file_picker.dart';
 import 'save_queue.dart';
 import 'save_failure_message.dart';
 import 'saved_article.dart';

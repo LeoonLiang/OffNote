@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 
 class MainActivity : FlutterActivity() {
     private var pendingBackupPickResult: MethodChannel.Result? = null
+    private var pendingResourcePickResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -115,28 +116,84 @@ class MainActivity : FlutterActivity() {
                 result.error("pick_failed", error.message, null)
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "offnote/resource_files"
+        ).setMethodCallHandler { call, result ->
+            val mimeType = when (call.method) {
+                "pickImageResourceFile" -> "image/*"
+                "pickVideoResourceFile" -> "video/*"
+                else -> null
+            }
+            if (mimeType == null) {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            if (pendingResourcePickResult != null) {
+                result.error("already_picking", "A resource file picker is already open", null)
+                return@setMethodCallHandler
+            }
+            pendingResourcePickResult = result
+            try {
+                val requestCode = if (mimeType.startsWith("image/")) {
+                    RESOURCE_IMAGE_PICK_REQUEST_CODE
+                } else {
+                    RESOURCE_VIDEO_PICK_REQUEST_CODE
+                }
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = mimeType
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivityForResult(intent, requestCode)
+            } catch (error: Exception) {
+                pendingResourcePickResult = null
+                result.error("pick_failed", error.message, null)
+            }
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != BACKUP_PICK_REQUEST_CODE) {
+        if (requestCode == BACKUP_PICK_REQUEST_CODE) {
+            val result = pendingBackupPickResult ?: return
+            pendingBackupPickResult = null
+            if (resultCode != Activity.RESULT_OK) {
+                result.success(null)
+                return
+            }
+            val uri = data?.data
+            if (uri == null) {
+                result.success(null)
+                return
+            }
+            try {
+                result.success(copyPickedBackupToCache(uri))
+            } catch (error: Exception) {
+                result.error("copy_failed", error.message, null)
+            }
             return
         }
-        val result = pendingBackupPickResult ?: return
-        pendingBackupPickResult = null
-        if (resultCode != Activity.RESULT_OK) {
-            result.success(null)
-            return
-        }
-        val uri = data?.data
-        if (uri == null) {
-            result.success(null)
-            return
-        }
-        try {
-            result.success(copyPickedBackupToCache(uri))
-        } catch (error: Exception) {
-            result.error("copy_failed", error.message, null)
+        if (
+            requestCode == RESOURCE_IMAGE_PICK_REQUEST_CODE ||
+            requestCode == RESOURCE_VIDEO_PICK_REQUEST_CODE
+        ) {
+            val result = pendingResourcePickResult ?: return
+            pendingResourcePickResult = null
+            if (resultCode != Activity.RESULT_OK) {
+                result.success(null)
+                return
+            }
+            val uri = data?.data
+            if (uri == null) {
+                result.success(null)
+                return
+            }
+            try {
+                result.success(copyPickedResourceToCache(uri))
+            } catch (error: Exception) {
+                result.error("copy_failed", error.message, null)
+            }
         }
     }
 
@@ -144,6 +201,22 @@ class MainActivity : FlutterActivity() {
         val importsDir = File(cacheDir, "backup-imports")
         importsDir.mkdirs()
         val name = sanitizeFileName(queryDisplayName(uri) ?: "imported.offnote-backup")
+        val target = File(importsDir, "${System.currentTimeMillis()}-$name")
+        contentResolver.openInputStream(uri).use { input ->
+            if (input == null) {
+                throw IllegalArgumentException("Cannot open selected file")
+            }
+            target.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        return target.absolutePath
+    }
+
+    private fun copyPickedResourceToCache(uri: Uri): String {
+        val importsDir = File(cacheDir, "resource-imports")
+        importsDir.mkdirs()
+        val name = sanitizeFileName(queryDisplayName(uri) ?: "resource")
         val target = File(importsDir, "${System.currentTimeMillis()}-$name")
         contentResolver.openInputStream(uri).use { input ->
             if (input == null) {
@@ -257,5 +330,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val BACKUP_PICK_REQUEST_CODE = 42031
+        private const val RESOURCE_IMAGE_PICK_REQUEST_CODE = 42041
+        private const val RESOURCE_VIDEO_PICK_REQUEST_CODE = 42042
     }
 }

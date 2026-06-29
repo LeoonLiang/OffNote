@@ -21,14 +21,23 @@ import 'video_marker.dart';
 import 'xhs_offline_html.dart';
 
 class ArticleSnapshotStore {
-  ArticleSnapshotStore({Dio? dio, ArticleDatabase? database})
-    : _dio = dio ?? Dio(),
-      _database = database ?? ArticleDatabase();
+  ArticleSnapshotStore({
+    Dio? dio,
+    ArticleDatabase? database,
+    Directory? documentsDirectory,
+  }) : _dio = dio ?? Dio(),
+       _database = database ?? ArticleDatabase(),
+       _documentsDirectoryOverride = documentsDirectory;
 
   final Dio _dio;
   final ArticleDatabase _database;
+  final Directory? _documentsDirectoryOverride;
   final VideoClipService _videoClipService = const VideoClipService();
   final BackupFilePicker _backupFilePicker = const BackupFilePicker();
+
+  Future<Directory> _documentsDirectory() async {
+    return _documentsDirectoryOverride ?? getApplicationDocumentsDirectory();
+  }
 
   Future<SavedArticle> save({
     required String rawHtml,
@@ -38,7 +47,7 @@ class ArticleSnapshotStore {
   }) async {
     final snapshot = parseArticleSnapshot(html: rawHtml, sourceUrl: sourceUrl);
     final id = DateTime.now().microsecondsSinceEpoch.toString();
-    final root = await getApplicationDocumentsDirectory();
+    final root = await _documentsDirectory();
     final articleDir = Directory(p.join(root.path, 'articles', id));
     final imageDir = Directory(p.join(articleDir.path, 'images'));
     final videoDir = Directory(p.join(articleDir.path, 'videos'));
@@ -362,7 +371,7 @@ class ArticleSnapshotStore {
     required Duration end,
     Set<String> tagIds = const {},
   }) async {
-    final root = await getApplicationDocumentsDirectory();
+    final root = await _documentsDirectory();
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final resourceDir = Directory(p.join(root.path, 'resources', id));
     await resourceDir.create(recursive: true);
@@ -481,21 +490,97 @@ class ArticleSnapshotStore {
     return _database.setResourceTags(resourceId, tagIds);
   }
 
-  Future<void> deleteResource(SavedResource resource) async {
-    await _database.deleteResource(resource.id);
-    if (resource.type == SavedResourceType.videoClip) {
-      final file = File(resource.sourcePath);
-      final parent = file.parent;
-      if (parent.existsSync() && p.basename(parent.path) == resource.id) {
-        await parent.delete(recursive: true);
-      } else if (file.existsSync()) {
-        await file.delete();
+  Future<SavedResource> importImageResource(String sourcePath) {
+    return _importPickedResource(sourcePath, type: SavedResourceType.image);
+  }
+
+  Future<SavedResource> importVideoResource(String sourcePath) {
+    return _importPickedResource(sourcePath, type: SavedResourceType.videoClip);
+  }
+
+  Future<SavedResource> _importPickedResource(
+    String sourcePath, {
+    required SavedResourceType type,
+  }) async {
+    final source = File(sourcePath);
+    if (!source.existsSync()) {
+      throw FileSystemException('选择的文件不存在', sourcePath);
+    }
+    final root = await _documentsDirectory();
+    final now = DateTime.now();
+    final id = now.microsecondsSinceEpoch.toString();
+    final resourceDir = Directory(p.join(root.path, 'resources', id));
+    await resourceDir.create(recursive: true);
+    try {
+      final copiedPath = p.join(
+        resourceDir.path,
+        _safeResourceFileName(p.basename(source.path), type),
+      );
+      await source.copy(copiedPath);
+      final resource = SavedResource(
+        id: id,
+        type: type,
+        articleId: '',
+        sourcePath: copiedPath,
+        previewPath: type == SavedResourceType.image ? copiedPath : null,
+        originalSourcePath: type == SavedResourceType.videoClip
+            ? copiedPath
+            : null,
+        title: _resourceTitleFromPath(source.path),
+        note: '',
+        status: SavedResourceStatus.ready,
+        createdAt: now,
+      );
+      await _database.upsertResource(resource);
+      return resource;
+    } catch (_) {
+      if (resourceDir.existsSync()) {
+        await resourceDir.delete(recursive: true);
       }
+      rethrow;
     }
   }
 
+  Future<void> deleteResource(SavedResource resource) async {
+    await _database.deleteResource(resource.id);
+    final resourceDir = await _managedResourceDirectory(resource);
+    if (resourceDir != null && resourceDir.existsSync()) {
+      await resourceDir.delete(recursive: true);
+    }
+  }
+
+  Future<Directory?> _managedResourceDirectory(SavedResource resource) async {
+    if (resource.sourcePath.trim().isEmpty) {
+      return null;
+    }
+    final root = await _documentsDirectory();
+    final resourcesRoot = p.normalize(p.join(root.path, 'resources'));
+    final parent = File(resource.sourcePath).parent;
+    final normalizedParent = p.normalize(parent.path);
+    if (p.basename(normalizedParent) != resource.id) {
+      return null;
+    }
+    if (!p.isWithin(resourcesRoot, normalizedParent)) {
+      return null;
+    }
+    return parent;
+  }
+
+  String _safeResourceFileName(String name, SavedResourceType type) {
+    final sanitized = name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    if (sanitized.trim().isNotEmpty && sanitized != '.' && sanitized != '..') {
+      return sanitized;
+    }
+    return type == SavedResourceType.image ? 'image' : 'video.mp4';
+  }
+
+  String _resourceTitleFromPath(String sourcePath) {
+    final name = p.basenameWithoutExtension(sourcePath).trim();
+    return name.isEmpty ? '未命名素材' : name;
+  }
+
   Future<ArticleStorageStats> loadStorageStats() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     final articles = await _database.listArticles();
     final categories = await _database.listCategories();
     return ArticleStorageStats.calculate(
@@ -506,7 +591,7 @@ class ArticleSnapshotStore {
   }
 
   Future<File> createBackup() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(
       database: _database,
       documentsDirectory: documentsDirectory,
@@ -514,7 +599,7 @@ class ArticleSnapshotStore {
   }
 
   Future<List<OffNoteBackupEntry>> listBackups() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(
       database: _database,
       documentsDirectory: documentsDirectory,
@@ -526,7 +611,7 @@ class ArticleSnapshotStore {
     if (path == null || path.trim().isEmpty) {
       return null;
     }
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(
       database: _database,
       documentsDirectory: documentsDirectory,
@@ -534,7 +619,7 @@ class ArticleSnapshotStore {
   }
 
   Future<File> importBackupFile(File backupFile) async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(
       database: _database,
       documentsDirectory: documentsDirectory,
@@ -542,7 +627,7 @@ class ArticleSnapshotStore {
   }
 
   Future<OffNoteBackupImportResult> restoreBackup(File backupFile) async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(
       database: _database,
       documentsDirectory: documentsDirectory,
@@ -550,7 +635,7 @@ class ArticleSnapshotStore {
   }
 
   Future<void> deleteBackup(File backupFile) async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final documentsDirectory = await _documentsDirectory();
     return OffNoteBackupService(
       database: _database,
       documentsDirectory: documentsDirectory,

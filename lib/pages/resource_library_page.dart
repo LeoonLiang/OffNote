@@ -1,11 +1,14 @@
 part of '../main.dart';
 
+enum _UploadResourceChoice { image, video }
+
 class ResourceLibraryPage extends StatefulWidget {
   const ResourceLibraryPage({
     super.key,
     required this.store,
     required this.onChanged,
     required this.resourceQueue,
+    this.filePicker = const ResourceFilePicker(),
     this.actions = const [],
     this.refreshToken = 0,
   });
@@ -13,6 +16,7 @@ class ResourceLibraryPage extends StatefulWidget {
   final ArticleSnapshotStore store;
   final VoidCallback onChanged;
   final ResourceProcessingQueueController resourceQueue;
+  final ResourceFilePicker filePicker;
   final List<Widget> actions;
   final int refreshToken;
 
@@ -33,6 +37,7 @@ class _ResourceLibraryPageState extends State<ResourceLibraryPage> {
   Set<String> _tagIds = const {};
   bool _isFilterExpanded = false;
   bool _isLoading = false;
+  bool _isUploading = false;
   bool _hasMore = true;
   int _loadGeneration = 0;
   String? _errorText;
@@ -173,7 +178,14 @@ class _ResourceLibraryPageState extends State<ResourceLibraryPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('素材库', style: TextStyle(fontWeight: FontWeight.w800)),
-        actions: widget.actions,
+        actions: [
+          IconButton(
+            onPressed: _isUploading ? null : _showUploadSheet,
+            tooltip: '上传素材',
+            icon: const Icon(Icons.upload_file_rounded),
+          ),
+          ...widget.actions,
+        ],
       ),
       body: SafeArea(
         child: Column(
@@ -269,7 +281,7 @@ class _ResourceLibraryPageState extends State<ResourceLibraryPage> {
               hasScrollBody: false,
               child: const _EmptyMessage(
                 icon: Icons.bookmarks_outlined,
-                text: '还没有收藏的图片或视频片段',
+                text: '还没有收藏或上传的图片、视频',
               ),
             ),
           ],
@@ -334,7 +346,9 @@ class _ResourceLibraryPageState extends State<ResourceLibraryPage> {
         fullscreenDialog: true,
         builder: (_) => _ResourceVideoPreview(
           resource: resource,
-          onOpenSource: () => _openSourceArticle(resource),
+          onOpenSource: savedResourceHasSourceArticle(resource)
+              ? () => _openSourceArticle(resource)
+              : null,
         ),
       ),
     );
@@ -396,6 +410,78 @@ class _ResourceLibraryPageState extends State<ResourceLibraryPage> {
     await widget.store.deleteResource(resource);
     await _loadFirstPage();
     widget.onChanged();
+  }
+
+  Future<void> _showUploadSheet() async {
+    final choice = await showModalBottomSheet<_UploadResourceChoice>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('上传图片'),
+              onTap: () {
+                Navigator.of(context).pop(_UploadResourceChoice.image);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.movie_outlined),
+              title: const Text('上传视频'),
+              onTap: () {
+                Navigator.of(context).pop(_UploadResourceChoice.video);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) {
+      return;
+    }
+    await _uploadResource(choice);
+  }
+
+  Future<void> _uploadResource(_UploadResourceChoice choice) async {
+    setState(() => _isUploading = true);
+    try {
+      final path = switch (choice) {
+        _UploadResourceChoice.image =>
+          await widget.filePicker.pickImageResourceFilePath(),
+        _UploadResourceChoice.video =>
+          await widget.filePicker.pickVideoResourceFilePath(),
+      };
+      if (path == null || path.trim().isEmpty) {
+        return;
+      }
+      switch (choice) {
+        case _UploadResourceChoice.image:
+          await widget.store.importImageResource(path);
+        case _UploadResourceChoice.video:
+          await widget.store.importVideoResource(path);
+      }
+      await _loadFirstPage();
+      widget.onChanged();
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('素材已上传')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('上传失败：$error')));
+    } finally {
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
+    }
   }
 
   void _retryResource(SavedResource resource) {
@@ -648,7 +734,7 @@ class _ResourceVideoPreview extends StatelessWidget {
   });
 
   final SavedResource resource;
-  final VoidCallback onOpenSource;
+  final VoidCallback? onOpenSource;
 
   @override
   Widget build(BuildContext context) {
@@ -659,11 +745,12 @@ class _ResourceVideoPreview extends StatelessWidget {
         foregroundColor: Colors.white,
         title: Text(resource.title, maxLines: 1),
         actions: [
-          IconButton(
-            onPressed: onOpenSource,
-            tooltip: '打开来源',
-            icon: const Icon(Icons.call_made_rounded),
-          ),
+          if (onOpenSource != null)
+            IconButton(
+              onPressed: onOpenSource,
+              tooltip: '打开来源',
+              icon: const Icon(Icons.call_made_rounded),
+            ),
         ],
       ),
       body: SafeArea(

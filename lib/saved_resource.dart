@@ -120,3 +120,7 @@ class SavedResource {
     return 0;
   }
 }
+
+bool savedResourceHasSourceArticle(SavedResource resource) {
+  return resource.articleId.trim().isNotEmpty;
+}

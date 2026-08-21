@@ -53,6 +53,13 @@ void main() {
     );
   });
 
+  test('supports the xhslink.cn short-link domain', () {
+    expect(
+      supportedXhsUrls(['https://xhslink.cn/o/AD0NBC6dmvQ']),
+      ['https://xhslink.cn/o/AD0NBC6dmvQ'],
+    );
+  });
+
   test('formats selected article links as plain text', () {
     final text = formatSelectedArticleLinks([
       'https://xhslink.com/a',

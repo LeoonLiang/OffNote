@@ -3,6 +3,7 @@ import 'saved_article.dart';
 bool isSupportedXhsUrl(String url) {
   final host = Uri.tryParse(url)?.host.toLowerCase() ?? '';
   return host == 'xhslink.com' ||
+      host == 'xhslink.cn' ||
       host == 'xiaohongshu.com' ||
       host.endsWith('.xiaohongshu.com');
 }

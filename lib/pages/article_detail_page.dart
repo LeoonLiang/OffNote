@@ -652,6 +652,21 @@ class _ImagePreviewPageState extends State<_ImagePreviewPage> {
     super.dispose();
   }
 
+  Future<void> _shareCurrentImage() async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(widget.files[_index].path)]),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('分享图片失败：$error')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -678,27 +693,30 @@ class _ImagePreviewPageState extends State<_ImagePreviewPage> {
         ],
       ),
       body: SafeArea(
-        child: PhotoViewGallery.builder(
-          pageController: _pageController,
-          itemCount: widget.files.length,
-          backgroundDecoration: const BoxDecoration(color: Colors.black),
-          onPageChanged: (index) => setState(() => _index = index),
-          builder: (context, index) {
-            return PhotoViewGalleryPageOptions(
-              imageProvider: FileImage(widget.files[index]),
-              minScale: PhotoViewComputedScale.contained,
-              maxScale: PhotoViewComputedScale.covered * 4,
-              errorBuilder: (_, _, _) => const Center(
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.white70,
-                  size: 42,
+        child: GestureDetector(
+          onLongPress: _shareCurrentImage,
+          child: PhotoViewGallery.builder(
+            pageController: _pageController,
+            itemCount: widget.files.length,
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            onPageChanged: (index) => setState(() => _index = index),
+            builder: (context, index) {
+              return PhotoViewGalleryPageOptions(
+                imageProvider: FileImage(widget.files[index]),
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 4,
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white70,
+                    size: 42,
+                  ),
                 ),
-              ),
-            );
-          },
-          loadingBuilder: (_, _) => const Center(
-            child: CircularProgressIndicator(color: Colors.white),
+              );
+            },
+            loadingBuilder: (_, _) => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
           ),
         ),
       ),

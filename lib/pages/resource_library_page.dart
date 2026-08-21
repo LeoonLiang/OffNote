@@ -706,6 +706,21 @@ class _ResourceImagePreview extends StatelessWidget {
 
   final SavedResource resource;
 
+  Future<void> _shareImage(BuildContext context) async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(resource.sourcePath)]),
+      );
+    } catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('分享图片失败：$error')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -715,12 +730,15 @@ class _ResourceImagePreview extends StatelessWidget {
         foregroundColor: Colors.white,
         title: Text(resource.title, maxLines: 1),
       ),
-      body: Center(
-        child: PhotoView(
-          imageProvider: FileImage(File(resource.sourcePath)),
-          backgroundDecoration: const BoxDecoration(color: Colors.black),
-          minScale: PhotoViewComputedScale.contained,
-          maxScale: PhotoViewComputedScale.covered * 4,
+      body: GestureDetector(
+        onLongPress: () => _shareImage(context),
+        child: Center(
+          child: PhotoView(
+            imageProvider: FileImage(File(resource.sourcePath)),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            minScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.covered * 4,
+          ),
         ),
       ),
     );
